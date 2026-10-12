@@ -1,7 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
   BridgeClient,
-  type AuthInfo,
   type BridgeEvent,
   type ConnState,
   type HermesStatus,
@@ -14,14 +13,13 @@ import {
 import { useI18n, type Key } from "../lib/i18n";
 import { currentHost } from "../office/host";
 import { applyInlineEdit, getInlineTarget, getSelectionText, replaceSelectionText, type InlineTarget } from "../office/tools";
-import { shortcutLabel, useInlineShortcut } from "../hooks/useInlineShortcut";
+import { isImeKey, shortcutLabel, useInlineShortcut } from "../hooks/useInlineShortcut";
 import InlineEdit, { type InlineState } from "./InlineEdit";
-import LoginModal, { type AuthProgress } from "./LoginModal";
 import ModelSelector from "./ModelSelector";
 import SkillsDrawer from "./SkillsDrawer";
 import ToolsPanel from "./ToolsPanel";
 import {
-  IconButton, IconCheck, IconChevron, IconCopy, IconEdit, IconInsert, IconSelection, IconSend, IconSkills, IconStop, IconTools, IconTrash, IconX, Pill, StatusDot,
+  IconButton, IconChevron, IconCopy, IconEdit, IconInsert, IconSelection, IconSend, IconSkills, IconStop, IconTools, IconTrash, IconX, Pill, StatusDot,
 } from "./ui";
 
 /** The CLI's quiet mode appends a `session_id:` footer; never insert that into a document. */
@@ -123,13 +121,6 @@ export default function App() {
   const [skillsOpen, setSkillsOpen] = useState(false);
   const [skillDetails, setSkillDetails] = useState<Record<string, SkillDetail | null>>({});
   const [confirmClear, setConfirmClear] = useState(false);
-  const [auth, setAuth] = useState<AuthInfo | null>(null);
-  const [confirmLogout, setConfirmLogout] = useState(false);
-  const [authOpen, setAuthOpen] = useState(false);
-  const [authDismissed, setAuthDismissed] = useState(false);
-  const [progress, setProgress] = useState<AuthProgress>({ stage: null, lines: [] });
-  const [selectMode, setSelectMode] = useState(false);
-  const [selected, setSelected] = useState<Set<number>>(new Set());
   const [officeTools, setOfficeTools] = useState<OfficeToolInfo[]>([]);
   const [toolsets, setToolsets] = useState<ToolsetInfo[]>([]);
   const [toolResults, setToolResults] = useState<Record<string, { ok: boolean; result: unknown }>>({});
@@ -187,18 +178,6 @@ export default function App() {
     switch (e.type) {
       case "status":
         setHermes(e.hermes);
-        break;
-      case "auth_status":
-        setAuth(e);
-        setHermes(e.hermes);
-        if (e.logged_in) setAuthOpen(false);
-        break;
-      case "auth_progress":
-        if (e.line === "exit") {
-          setProgress((p) => ({ ...p, stage: null, failed: !e.ok, manual: e.manual }));
-        } else {
-          setProgress((p) => ({ stage: e.stage, lines: e.line === "start" ? [] : [...p.lines, e.line].slice(-40), url: e.url ?? p.url }));
-        }
         break;
       case "models":
         setModels(e.models);
@@ -260,7 +239,7 @@ export default function App() {
     const c = new BridgeClient(onEvent, (s) => {
       setConn(s);
       if (s === "open") {
-        for (const type of ["list_models", "list_skills", "list_tools", "auth_status"]) c.send({ type });
+        for (const type of ["list_models", "list_skills", "list_tools"]) c.send({ type });
         // Give a fresh bridge session the restored conversation as context (ignored if it already has history).
         const hist = histRef.current
           .filter((m) => (m.role === "user" || m.role === "assistant") && m.text)
@@ -334,17 +313,6 @@ export default function App() {
     }
   };
 
-  const startLogin = () => {
-    setProgress({ stage: "login", lines: [] });
-    safeSend({ type: "auth_google" });
-  };
-  const startInstall = () => {
-    setProgress({ stage: "hermes", lines: [] });
-    safeSend({ type: "setup_install", target: "hermes" });
-  };
-  const needAuth = !!auth && (!auth.hermes.installed || !auth.logged_in);
-  const showAuth = needAuth && (authOpen || (!authDismissed && conn === "open"));
-
   const selectModel = (m: ModelOption | null) => safeSend({ type: "set_model", model: m?.id ?? null, provider: m?.provider ?? null });
   const changeSkills = (names: string[]) => {
     setActiveSkills(names);
@@ -405,28 +373,7 @@ export default function App() {
     setMsgs([]);
     saveHistory([]);
     setConfirmClear(false);
-    exitSelect();
   };
-
-  const exitSelect = () => {
-    setSelectMode(false);
-    setSelected(new Set());
-  };
-  /** Remove messages by index and persist immediately (the debounced save would lag 250ms). */
-  const deleteMsgs = (idx: Set<number>) => {
-    const next = histRef.current.filter((_, i) => !idx.has(i));
-    histRef.current = next;
-    setMsgs(next);
-    saveHistory(next);
-    setSelected(new Set());
-    if (!next.length) setSelectMode(false);
-  };
-  const toggleSel = (i: number) =>
-    setSelected((s) => {
-      const n = new Set(s);
-      if (!n.delete(i)) n.add(i);
-      return n;
-    });
 
   const lastMsg = msgs[msgs.length - 1];
   const toolRunning = msgs.some((m) => m.pending);
@@ -442,7 +389,6 @@ export default function App() {
   const chat = tab === "chat";
   const canSend = !!input.trim() && !busy && conn === "open";
   const last = msgs.length - 1;
-  const selectable = msgs.flatMap((m, i) => (m.pending || (busy && i === last) ? [] : [i]));
 
   return (
     <div className="hx relative flex h-full flex-col overflow-hidden">
@@ -454,11 +400,6 @@ export default function App() {
         </span>
         <span className="text-[11px] capitalize text-gray-500">{currentHost()}</span>
         <span className="flex-1" />
-        {auth?.logged_in && auth.account && (
-          <button type="button" onClick={() => { if (confirmLogout) { setConfirmLogout(false); safeSend({ type: "auth_logout" }); } else { setConfirmLogout(true); window.setTimeout(() => setConfirmLogout(false), 4000); } }} data-tip={t("auth.signedInAs", { email: auth.account }) + " · " + t("auth.logout")} data-tip-left="" className="max-w-[90px] truncate text-[10px] text-emerald-600 hover:underline">
-            {confirmLogout ? t("auth.logout") + "?" : auth.account}
-          </button>
-        )}
         <button
           type="button"
           aria-label={t("lang.switch")}
@@ -474,13 +415,11 @@ export default function App() {
         <IconButton tip={t("header.inline", { key: shortcutLabel })} onClick={() => void openInline()}><IconEdit /></IconButton>
         <IconButton tip={activeSkills.length ? t("header.skillsActive", { n: activeSkills.length }) : t("header.skills")} onClick={() => setSkillsOpen(true)} active={activeSkills.length > 0}><IconSkills /></IconButton>
         <IconButton tip={t("header.tools")} onClick={() => setTab(chat ? "tools" : "chat")} active={!chat}><IconTools /></IconButton>
-        <IconButton tip={selectMode ? t("history.exitSelectMode") : t("history.selectMode")} onClick={() => (selectMode ? exitSelect() : setSelectMode(true))} disabled={!msgs.length} active={selectMode}><IconCheck /></IconButton>
-        <IconButton tip={t("history.clearAll")} onClick={() => setConfirmClear(true)} disabled={!msgs.length} danger><IconTrash /></IconButton>
+        <IconButton tip={t("history.clear")} onClick={() => setConfirmClear(true)} disabled={!msgs.length} danger><IconTrash /></IconButton>
       </header>
 
-      {(conn === "closed" || (hermes && !hermes.installed) || needAuth || error) && (
+      {(conn === "closed" || (hermes && !hermes.installed) || error) && (
         <div className="shrink-0 space-y-1 px-2 pt-1.5">
-          {needAuth && auth?.hermes.installed && <Pill tone="warn" onClick={() => setAuthOpen(true)}>{t("banner.signIn")}</Pill>}
           {conn === "closed" && <Pill tone="warn">{t("banner.bridgeDown")}</Pill>}
           {hermes && !hermes.installed && <Pill tone="bad">{t("banner.noHermes")}</Pill>}
           {error && (
@@ -513,81 +452,33 @@ export default function App() {
             <p className="text-[11px]">{t("empty.hint", { key: shortcutLabel })}</p>
           </div>
         )}
-        {msgs.map((m, i) => {
-          const live = !!busy && i === last;
-          const sel = selected.has(i);
-          return (
-            <div key={i} className="group flex items-start gap-1.5">
-              {selectMode && (
-                <input
-                  type="checkbox"
-                  checked={sel}
-                  disabled={live || m.pending}
-                  onChange={() => toggleSel(i)}
-                  aria-label={t("history.selectMsg")}
-                  className="mt-1.5 h-3.5 w-3.5 shrink-0 accent-indigo-600"
-                />
-              )}
-              <div
-                className={"min-w-0 flex-1 " + (selectMode ? "cursor-pointer " + (sel ? "opacity-100" : "opacity-70") : "")}
-                onClick={selectMode && !live && !m.pending ? () => toggleSel(i) : undefined}
-              >
-                {m.role === "tool" ? (
-                  <ToolStep m={m} />
-                ) : m.role === "user" ? (
-                  <div className="ml-8 animate-pop whitespace-pre-wrap break-words rounded-xl rounded-br-sm bg-indigo-600 px-2.5 py-1.5 text-[13px] text-white">
-                    {m.text}
-                  </div>
-                ) : (
-                  <div className="animate-pop">
-                    <div className="whitespace-pre-wrap break-words rounded-xl rounded-bl-sm border border-gray-500/20 bg-gray-500/[0.06] px-2.5 py-1.5 text-[13px]">
-                      {m.text}
-                      {live && <span className="ml-0.5 inline-block h-3 w-[2px] animate-pulse bg-indigo-500 align-middle" />}
-                    </div>
-                    {!live && !selectMode && (
-                      <div className="mt-0.5 flex gap-0.5 opacity-0 transition-opacity group-hover:opacity-100 focus-within:opacity-100">
-                        <IconButton tip={t("msg.insert")} onClick={() => void insertMsg(m)} tipLeft><IconInsert /></IconButton>
-                        <IconButton tip={t("msg.copy")} onClick={() => void navigator.clipboard?.writeText(clean(m.text).trim())} tipLeft><IconCopy /></IconButton>
-                      </div>
-                    )}
-                  </div>
-                )}
+        {msgs.map((m, i) =>
+          m.role === "tool" ? (
+            <ToolStep key={i} m={m} />
+          ) : m.role === "user" ? (
+            <div key={i} className="ml-8 animate-pop whitespace-pre-wrap break-words rounded-xl rounded-br-sm bg-indigo-600 px-2.5 py-1.5 text-[13px] text-white">
+              {m.text}
+            </div>
+          ) : (
+            <div key={i} className="group animate-pop">
+              <div className="whitespace-pre-wrap break-words rounded-xl rounded-bl-sm border border-gray-500/20 bg-gray-500/[0.06] px-2.5 py-1.5 text-[13px]">
+                {m.text}
+                {busy && i === last && <span className="ml-0.5 inline-block h-3 w-[2px] animate-pulse bg-indigo-500 align-middle" />}
               </div>
-              {!selectMode && !live && !m.pending && (
-                <div className="mt-0.5 shrink-0 opacity-0 transition-opacity group-hover:opacity-100 focus-within:opacity-100">
-                  <IconButton tip={t("history.deleteSingle")} onClick={() => deleteMsgs(new Set([i]))} tipLeft danger><IconTrash /></IconButton>
+              {!(busy && i === last) && (
+                <div className="mt-0.5 flex gap-0.5 opacity-0 transition-opacity group-hover:opacity-100 focus-within:opacity-100">
+                  <IconButton tip={t("msg.insert")} onClick={() => void insertMsg(m)} tipLeft><IconInsert /></IconButton>
+                  <IconButton tip={t("msg.copy")} onClick={() => void navigator.clipboard?.writeText(clean(m.text).trim())} tipLeft><IconCopy /></IconButton>
                 </div>
               )}
             </div>
-          );
-        })}
+          ),
+        )}
         {busy && !streaming && !toolRunning && (
           <div className="flex items-center gap-1.5 px-1 text-[11px]"><StatusDot tone="accent" pulse /><span className="shimmer-text">{t("status.thinkingShort")}</span></div>
         )}
         <div ref={endRef} />
       </div>
-
-      {selectMode && chat && (
-        <div className="flex shrink-0 flex-wrap items-center gap-1 border-t border-gray-500/20 bg-gray-500/[0.06] px-2 py-1.5 text-[11px]">
-          <span className="mr-auto font-medium">{t("history.selectedCount", { n: selected.size })}</span>
-          <button
-            type="button"
-            onClick={() => setSelected(selected.size === selectable.length ? new Set() : new Set(selectable))}
-            className="h-6 rounded-md border border-gray-500/30 px-2 hover:bg-gray-500/10"
-          >
-            {selected.size === selectable.length && selectable.length ? t("history.deselectAll") : t("history.selectAll")}
-          </button>
-          <button
-            type="button"
-            disabled={!selected.size}
-            onClick={() => deleteMsgs(selected)}
-            className="h-6 rounded-md bg-red-600 px-2 font-medium text-white hover:bg-red-500 disabled:opacity-40"
-          >
-            {t("history.deleteSelected", { n: selected.size })}
-          </button>
-          <button type="button" onClick={exitSelect} className="h-6 rounded-md border border-gray-500/30 px-2 hover:bg-gray-500/10">{t("history.cancel")}</button>
-        </div>
-      )}
 
       {/* Composer */}
       <div className={"shrink-0 space-y-1.5 px-2 pb-2 pt-1 " + (chat ? "" : "hidden")}>
@@ -627,7 +518,7 @@ export default function App() {
             placeholder={t("composer.placeholder")}
             className="block max-h-40 w-full px-2.5 pb-0.5 pt-2 text-[13px] placeholder:text-gray-400"
             onKeyDown={(e) => {
-              if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) {
+              if (e.key === "Enter" && !e.shiftKey && !isImeKey(e)) {
                 e.preventDefault();
                 void send();
               }
@@ -679,16 +570,6 @@ export default function App() {
             </div>
           </div>
         </div>
-      )}
-      {showAuth && (
-        <LoginModal
-          auth={auth}
-          progress={progress}
-          onLogin={startLogin}
-          onCancel={() => safeSend({ type: "auth_cancel" })}
-          onInstall={startInstall}
-          onClose={() => { setAuthOpen(false); setAuthDismissed(true); }}
-        />
       )}
       <SkillsDrawer
         details={skillDetails}

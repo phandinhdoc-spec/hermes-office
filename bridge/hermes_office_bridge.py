@@ -14,9 +14,6 @@ client -> bridge
   {"type": "run_toolset", "id": str, "toolset": str, "text": str}  (one-shot Hermes run limited to a toolset)
   {"type": "inline", "id": str, "text": str, "target": str, "host": str}  (rewrite `target`, no tools)
   {"type": "rpc_result", "id": str, "result": any} | {"type": "rpc_result", "id": str, "error": str}
-  {"type": "auth_status"}                      (hermes/agy installed + Google account logged in?)
-  {"type": "auth_google"} | {"type": "auth_cancel"} | {"type": "auth_logout"}   (Google OAuth via Antigravity)
-  {"type": "setup_install", "target": "hermes|agy"}                            (stream installer progress)
 
 bridge -> client
   {"type": "status", "hermes": {...}, "tools": [...]}
@@ -28,8 +25,6 @@ bridge -> client
   {"type": "models", "models": [...], "current": {...}} | {"type": "skills", "skills": [...], "active": [str]}
   {"type": "tools_info", "office": [...], "hermes": [...]}
   {"type": "rpc_request", "id": str, "tool": str, "args": {...}}    (client must answer with rpc_result)
-  {"type": "auth_status", **auth_info}                              (broadcast to every session when it changes)
-  {"type": "auth_progress", "stage": str, "line": str?, "url": str?}   (login / setup progress)
 
 The agent triggers Office edits by emitting fenced blocks in its reply:
 
@@ -44,6 +39,7 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import codecs
 import json
 import logging
 import os
@@ -73,12 +69,6 @@ CORE_MODEL = os.environ.get("HERMES_CORE_MODEL", "claude-3-5-sonnet") or None
 CORE_PROVIDER = os.environ.get("HERMES_CORE_PROVIDER") or None
 FAST_MODEL = os.environ.get("HERMES_FAST_MODEL", "gemini-3.8-flash") or None
 FAST_PROVIDER = os.environ.get("HERMES_FAST_PROVIDER") or None
-# Official installers used by the in-extension setup flow (override with env vars; empty = unsupported).
-HERMES_INSTALL_URL = os.environ.get(
-    "HERMES_INSTALL_URL", "https://raw.githubusercontent.com/NousResearch/hermes-agent/main/scripts/install.sh"
-)
-AGY_INSTALL_URL = os.environ.get("AGY_INSTALL_URL", "")
-AUTH_PROVIDER = os.environ.get("HERMES_AUTH_PROVIDER", "antigravity")  # Google sign-in provider id in Hermes
 CERT_DIR = Path.home() / ".hermes-office" / "certs"
 DIST_DIR = Path(os.environ.get("HERMES_OFFICE_DIST") or Path(__file__).resolve().parent.parent / "addin" / "dist")
 
@@ -163,136 +153,15 @@ async def hermes_status() -> Dict[str, Any]:
     return {"installed": True, "path": path, "version": version}
 
 
-def find_agy() -> Optional[str]:
-    for c in (os.environ.get("AGY_BIN"), shutil.which("agy"), str(Path.home() / ".local" / "bin" / "agy")):
-        if c and os.path.isfile(c) and os.access(c, os.X_OK):
-            return c
-    return None
-
-
-# --------------------------------------------------------------------------- google auth / setup
-
-URL_RE = re.compile(r"https?://[^\s\"'<>]+")
-ANSI_RE = re.compile(r"\x1b\[[0-9;?]*[A-Za-z]")
-URL_ALLOWED = re.compile(r"^https://([\w-]+\.)*(google\.com|googleapis\.com|antigravity\.google|nousresearch\.com)(/|$)")
-
-
-def google_account() -> Optional[str]:
-    """Email of the signed-in Google account, read from Hermes' auth store (never the tokens)."""
-    try:
-        data = json.loads((hermes_home() / "auth.json").read_text(encoding="utf-8"))
-        prov = (data.get("providers") or {}).get(AUTH_PROVIDER) or {}
-        email = prov.get("email")
-        return email if isinstance(email, str) else None
-    except (OSError, ValueError):
-        return None
-
-
-async def auth_info() -> Dict[str, Any]:
-    hermes = await hermes_status()
-    logged_in = False
-    if hermes["installed"]:
-        try:
-            out = await run_cli("auth", "status", AUTH_PROVIDER, timeout=15)
-            logged_in = bool(re.search(r"logged in", out, re.I)) and not re.search(r"not logged in|logged out", out, re.I)
-        except Exception as exc:  # noqa: BLE001
-            log.warning("auth status failed: %s", exc)
-    return {
-        "hermes": hermes,
-        "agy": {"installed": bool(find_agy()), "path": find_agy()},
-        "logged_in": logged_in,
-        "account": google_account() if logged_in else None,
-        "provider": AUTH_PROVIDER,
-        "models": {"core": CORE_MODEL, "fast": FAST_MODEL},
-        "login_running": login_task is not None and not login_task.done(),
-        "install_running": install_task is not None and not install_task.done(),
-    }
-
-
-async def broadcast(msg: Dict[str, Any]) -> None:
-    for s in list(sessions.values()):
-        try:
-            await s.send(msg)
-        except Exception:  # noqa: BLE001
-            pass
-
-
-async def stream_process(cmd: List[str], stage: str, env: Optional[Dict[str, str]] = None, shell_script: Optional[bytes] = None) -> int:
-    """Run `cmd`, broadcasting each output line as auth_progress (and any URL found in it)."""
-    proc = await asyncio.create_subprocess_exec(
-        *cmd, stdin=asyncio.subprocess.PIPE if shell_script is not None else asyncio.subprocess.DEVNULL,
-        stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.STDOUT, env={**os.environ, "NO_COLOR": "1", **(env or {})},
-    )
-    if shell_script is not None and proc.stdin:
-        proc.stdin.write(shell_script)
-        await proc.stdin.drain()
-        proc.stdin.close()
-    try:
-        assert proc.stdout is not None
-        async for raw in proc.stdout:
-            line = ANSI_RE.sub("", raw.decode(errors="replace")).strip()
-            if not line:
-                continue
-            frame: Dict[str, Any] = {"type": "auth_progress", "stage": stage, "line": line[:400]}
-            m = URL_RE.search(line)
-            if m and URL_ALLOWED.match(m.group(0)):
-                frame["url"] = m.group(0)
-            await broadcast(frame)
-        return await proc.wait()
-    except asyncio.CancelledError:
-        if proc.returncode is None:
-            proc.kill()
-        raise
-
-
-login_task: "Optional[asyncio.Task[None]]" = None
-install_task: "Optional[asyncio.Task[None]]" = None
-
-
-async def _login() -> None:
-    try:
-        await broadcast({"type": "auth_progress", "stage": "login", "line": "start"})
-        rc = await asyncio.wait_for(
-            stream_process([find_hermes() or "hermes", "auth", "add", AUTH_PROVIDER, "--type", "oauth"], "login"), timeout=300
-        )
-        await broadcast({"type": "auth_progress", "stage": "login", "line": "exit", "ok": rc == 0})
-    except asyncio.TimeoutError:
-        await broadcast({"type": "auth_progress", "stage": "login", "line": "exit", "ok": False, "timeout": True})
-    except asyncio.CancelledError:
-        await broadcast({"type": "auth_progress", "stage": "login", "line": "exit", "ok": False, "cancelled": True})
-    except Exception as exc:  # noqa: BLE001
-        log.exception("login failed")
-        await broadcast({"type": "auth_progress", "stage": "login", "line": "exit", "ok": False, "error": str(exc)})
-    finally:
-        await broadcast({"type": "auth_status", **await auth_info()})
-
-
-async def _install(target: str) -> None:
-    url = HERMES_INSTALL_URL if target == "hermes" else AGY_INSTALL_URL
-    try:
-        if not url or not url.startswith("https://"):
-            await broadcast({"type": "auth_progress", "stage": target, "line": "exit", "ok": False, "manual": True})
-            return
-        if sys.platform == "win32":
-            await broadcast({"type": "auth_progress", "stage": target, "line": "exit", "ok": False, "manual": True})
-            return
-        import urllib.request
-
-        def fetch() -> bytes:
-            with urllib.request.urlopen(url, timeout=60) as r:  # noqa: S310 (https only, checked above)
-                return r.read(2_000_000)
-
-        script = await asyncio.get_running_loop().run_in_executor(None, fetch)
-        await broadcast({"type": "auth_progress", "stage": target, "line": f"downloaded installer ({len(script)} bytes)"})
-        rc = await stream_process(["bash", "-s"], target, shell_script=script)
-        await broadcast({"type": "auth_progress", "stage": target, "line": "exit", "ok": rc == 0})
-    except asyncio.CancelledError:
-        raise
-    except Exception as exc:  # noqa: BLE001
-        log.exception("install failed")
-        await broadcast({"type": "auth_progress", "stage": target, "line": "exit", "ok": False, "error": str(exc)})
-    finally:
-        await broadcast({"type": "auth_status", **await auth_info()})
+def utf8_env(extra: Optional[Dict[str, str]] = None) -> Dict[str, str]:
+    """Environment forcing UTF-8 in child processes (LaunchAgent/systemd/Task start with no LANG)."""
+    env = {**os.environ, "PYTHONUTF8": "1", "PYTHONIOENCODING": "utf-8"}
+    if "UTF-8" not in (env.get("LC_ALL") or env.get("LANG") or "").upper().replace("UTF8", "UTF-8"):
+        env["LANG"] = "en_US.UTF-8"
+        env["LC_ALL"] = "en_US.UTF-8"
+    if extra:
+        env.update(extra)
+    return env
 
 
 SYSTEM_PREAMBLE = """You are Hermes, embedded in Microsoft {app} through an Office add-in.
@@ -358,17 +227,25 @@ async def run_hermes(
         stdin=asyncio.subprocess.DEVNULL,
         stdout=asyncio.subprocess.PIPE,
         stderr=asyncio.subprocess.PIPE,
+        env=utf8_env(),
     )
     chunks: List[str] = []
+    decoder = codecs.getincrementaldecoder("utf-8")(errors="replace")  # multi-byte chars (Vietnamese) can straddle reads
     try:
         assert proc.stdout is not None
         while True:
             data = await proc.stdout.read(1024)
             if not data:
                 break
-            text = data.decode(errors="replace")
+            text = decoder.decode(data)
+            if not text:
+                continue
             chunks.append(text)
             await on_chunk(text)
+        tail = decoder.decode(b"", final=True)
+        if tail:
+            chunks.append(tail)
+            await on_chunk(tail)
         rc = await proc.wait()
         if rc != 0:
             err = (await proc.stderr.read()).decode(errors="replace").strip() if proc.stderr else ""
@@ -443,7 +320,7 @@ async def run_cli(*args: str, timeout: float = 30) -> str:
     path = find_hermes()
     if not path:
         raise HermesNotFound("Hermes CLI not found")
-    env = {**os.environ, "COLUMNS": "400", "NO_COLOR": "1"}
+    env = utf8_env({"COLUMNS": "400", "NO_COLOR": "1"})
     proc = await asyncio.create_subprocess_exec(
         path, *args, stdin=asyncio.subprocess.DEVNULL, stdout=asyncio.subprocess.PIPE,
         stderr=asyncio.subprocess.STDOUT, env=env,
@@ -774,7 +651,7 @@ class Session:
 
     async def send(self, msg: Dict[str, Any]) -> None:
         async with self.send_lock:
-            await self.ws.send_text(json.dumps(msg))
+            await self.ws.send_text(json.dumps(msg, ensure_ascii=False))
 
     async def rpc(self, tool: str, args: Dict[str, Any]) -> Any:
         if tool not in TOOLS:
@@ -949,22 +826,6 @@ async def status() -> Dict[str, Any]:
     return {"hermes": await hermes_status(), "tools": list(TOOLS)}
 
 
-@app.get("/auth/status")
-async def auth_status_route() -> Dict[str, Any]:
-    return await auth_info()
-
-
-@app.post("/auth/google")
-async def auth_google_route() -> Dict[str, Any]:
-    """Start the Google (Antigravity) OAuth flow; progress and the sign-in URL arrive over /ws."""
-    global login_task
-    if not find_hermes():
-        raise HTTPException(409, "Hermes CLI not found")
-    if not (login_task and not login_task.done()):
-        login_task = asyncio.create_task(_login())
-    return {"started": True}
-
-
 @app.get("/tools")
 async def tools() -> Dict[str, Any]:
     return TOOLS
@@ -1028,10 +889,6 @@ async def http_rpc(tool: str, args: Optional[Dict[str, Any]] = None) -> Dict[str
 
 @app.websocket("/ws")
 async def ws_endpoint(ws: WebSocket) -> None:
-    origin = ws.headers.get("origin")
-    if origin and not re.match(r"^https?://(localhost|127\.0\.0\.1)(:\d+)?$", origin):
-        await ws.close(code=1008)  # only local pages may drive login/install
-        return
     await ws.accept()
     sess = Session(ws)
     sessions[sess.id] = sess
@@ -1049,28 +906,6 @@ async def ws_endpoint(ws: WebSocket) -> None:
                 t = sess.tasks.get(msg.get("id", ""))
                 if t:
                     t.cancel()
-            elif kind == "auth_status":
-                await sess.send({"type": "auth_status", **await auth_info()})
-            elif kind == "auth_google":
-                global login_task
-                if not find_hermes():
-                    await sess.send({"type": "error", "message": "Hermes CLI not found", "code": "hermes_not_found"})
-                elif not (login_task and not login_task.done()):
-                    login_task = asyncio.create_task(_login())
-            elif kind == "auth_cancel":
-                if login_task and not login_task.done():
-                    login_task.cancel()
-            elif kind == "auth_logout":
-                try:
-                    await run_cli("auth", "logout", AUTH_PROVIDER, timeout=30)
-                except Exception as exc:  # noqa: BLE001
-                    await sess.send({"type": "error", "message": str(exc)})
-                await broadcast({"type": "auth_status", **await auth_info()})
-            elif kind == "setup_install":
-                global install_task
-                target = msg.get("target")
-                if target in ("hermes", "agy") and not (install_task and not install_task.done()):
-                    install_task = asyncio.create_task(_install(target))
             elif kind == "list_models":
                 await sess.send({"type": "models", **list_models(), "selected": {"model": sess.model, "provider": sess.provider}})
             elif kind == "set_model":

@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { useI18n } from "../lib/i18n";
-import { shortcutLabel } from "../hooks/useInlineShortcut";
+import { isImeKey, shortcutLabel } from "../hooks/useInlineShortcut";
 import { IconButton, IconCheck, IconSend, IconStop, IconX, btnGhost, btnPrimary, card } from "./ui";
 
 export interface InlineState {
@@ -65,7 +65,7 @@ export default function InlineEdit({ state, onSubmit, onAccept, onCancel, onClos
             placeholder={t("inline.placeholder")}
             onChange={(e) => setText(e.target.value)}
             onKeyDown={(e) => {
-              if (e.key === "Enter" && !e.shiftKey && text.trim()) {
+              if (e.key === "Enter" && !e.shiftKey && !isImeKey(e) && text.trim()) {
                 e.preventDefault();
                 onSubmit(text.trim(), e.metaKey || e.ctrlKey);
               }
