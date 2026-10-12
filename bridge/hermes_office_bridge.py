@@ -57,7 +57,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
-from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, HTTPException, Request, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 
@@ -1046,6 +1046,37 @@ async def http_rpc(tool: str, args: Optional[Dict[str, Any]] = None) -> Dict[str
         raise HTTPException(500, str(exc))
 
 
+LOCAL_ORIGIN_RE = re.compile(r"^https?://(localhost|127\.0\.0\.1)(:\d+)?$")
+COMPOSE_MAX = 20000
+
+
+def open_in_browser(url: str) -> None:
+    """Open `url` in the user's default browser (works from a LaunchAgent / systemd user unit / Windows task)."""
+    import subprocess
+    if sys.platform == "darwin":
+        cmd = ["open", url]
+    elif sys.platform.startswith("win"):
+        cmd = ["cmd", "/c", "start", "", url]
+    else:
+        cmd = ["xdg-open", url]
+    subprocess.Popen(cmd, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+
+
+@app.post("/compose")
+async def compose_route(request: Request) -> Dict[str, Any]:
+    """Text typed in the browser compose page (where the OS input method works) -> every open task pane."""
+    origin = request.headers.get("origin")
+    if origin and not LOCAL_ORIGIN_RE.match(origin):
+        raise HTTPException(403, "local pages only")
+    body = await request.json()
+    text = str(body.get("text", ""))[:COMPOSE_MAX]
+    target = "inline" if body.get("target") == "inline" else "chat"
+    if not text.strip():
+        raise HTTPException(400, "empty text")
+    await broadcast({"type": "compose", "target": target, "text": text})
+    return {"ok": True, "delivered": len(sessions)}
+
+
 @app.websocket("/ws")
 async def ws_endpoint(ws: WebSocket) -> None:
     origin = ws.headers.get("origin")
@@ -1091,6 +1122,15 @@ async def ws_endpoint(ws: WebSocket) -> None:
                 target = msg.get("target")
                 if target in ("hermes", "agy") and not (install_task and not install_task.done()):
                     install_task = asyncio.create_task(_install(target))
+            elif kind == "open_compose":
+                tgt = "inline" if msg.get("target") == "inline" else "chat"
+                lang = "en" if msg.get("lang") == "en" else "vi"
+                host_hdr = ws.headers.get("host") or f"localhost:{DEFAULT_PORT}"
+                scheme = "https" if ws.url.scheme == "wss" else "http"
+                try:
+                    open_in_browser(f"{scheme}://{host_hdr}/compose.html?target={tgt}&lang={lang}")
+                except Exception as exc:  # noqa: BLE001
+                    await sess.send({"type": "error", "message": f"cannot open browser: {exc}"})
             elif kind == "list_models":
                 await sess.send({"type": "models", **list_models(), "selected": {"model": sess.model, "provider": sess.provider}})
             elif kind == "set_model":

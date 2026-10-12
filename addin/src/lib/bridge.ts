@@ -20,6 +20,7 @@ export interface AuthInfo {
 export type BridgeEvent =
   | ({ type: "auth_status" } & AuthInfo)
   | { type: "auth_progress"; stage: string; line: string; url?: string; ok?: boolean; manual?: boolean; cancelled?: boolean; timeout?: boolean; error?: string }
+  | { type: "compose"; target: "chat" | "inline"; text: string }
   | { type: "status"; hermes: HermesStatus; tools: string[] }
   | { type: "delta"; id: string; text: string }
   | { type: "tool_call"; id: string; tool: string; args: unknown }

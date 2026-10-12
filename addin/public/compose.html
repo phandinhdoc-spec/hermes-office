@@ -1,0 +1,56 @@
+<!doctype html>
+<html lang="vi">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Hermes Office — Soạn văn bản</title>
+<style>
+  body { font-family: "Segoe UI", "Helvetica Neue", Arial, "Noto Sans", sans-serif; line-height: 1.6; max-width: 720px; margin: 32px auto; padding: 0 16px; color: #1f2328; }
+  h1 { font-size: 18px; margin: 0 0 4px; }
+  p { margin: 0 0 12px; color: #57606a; font-size: 14px; }
+  textarea { width: 100%; box-sizing: border-box; font: inherit; font-size: 16px; line-height: 1.7; padding: 10px 12px; border: 1px solid #bbb; border-radius: 8px; resize: vertical; }
+  textarea:focus { outline: 2px solid #6366f1; border-color: transparent; }
+  .row { display: flex; gap: 8px; align-items: center; margin-top: 10px; }
+  button { font: inherit; font-size: 14px; padding: 8px 16px; border-radius: 8px; border: 0; background: #4f46e5; color: #fff; cursor: pointer; }
+  button:disabled { opacity: .5; cursor: default; }
+  #msg { font-size: 13px; color: #57606a; }
+  #msg.err { color: #b42318; }
+</style>
+</head>
+<body>
+<h1 id="h">Soạn văn bản (gõ tiếng Việt)</h1>
+<p id="d">Gõ ở đây rồi bấm “Gửi vào Office”. Nội dung sẽ xuất hiện trong khung của tiện ích.</p>
+<textarea id="t" rows="10" autofocus spellcheck="false" lang="vi"></textarea>
+<div class="row"><button id="b" type="button">Gửi vào Office</button><span id="msg"></span></div>
+<script>
+(function () {
+  var q = new URLSearchParams(location.search);
+  var target = q.get("target") === "inline" ? "inline" : "chat";
+  var en = q.get("lang") === "en";
+  var t = document.getElementById("t"), b = document.getElementById("b"), m = document.getElementById("msg");
+  if (en) {
+    document.documentElement.lang = "en";
+    document.getElementById("h").textContent = "Compose text";
+    document.getElementById("d").textContent = "Type here, then press “Send to Office”. The text will appear in the add-in.";
+    b.textContent = "Send to Office";
+  }
+  var done = en ? "Sent. You can close this tab." : "Đã gửi. Bạn có thể đóng tab này.";
+  var fail = en ? "Send failed: " : "Gửi thất bại: ";
+  function send() {
+    var text = t.value;
+    if (!text.trim()) return;
+    b.disabled = true; m.className = ""; m.textContent = "…";
+    fetch("/compose", { method: "POST", headers: { "Content-Type": "application/json; charset=utf-8" }, body: JSON.stringify({ text: text, target: target }) })
+      .then(function (r) { if (!r.ok) throw new Error("HTTP " + r.status); return r.json(); })
+      .then(function () { m.textContent = done; t.value = ""; })
+      .catch(function (e) { m.className = "err"; m.textContent = fail + e.message; })
+      .then(function () { b.disabled = false; });
+  }
+  b.addEventListener("click", send);
+  t.addEventListener("keydown", function (e) {
+    if (e.key === "Enter" && (e.metaKey || e.ctrlKey) && !e.isComposing && e.keyCode !== 229) { e.preventDefault(); send(); }
+  });
+})();
+</script>
+</body>
+</html>

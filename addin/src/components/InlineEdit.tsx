@@ -18,13 +18,19 @@ interface Props {
   onAccept: () => void;
   onCancel: () => void;
   onClose: () => void;
+  /** Text typed in the browser compose page; applied whenever `seq` changes. */
+  incoming?: { text: string; seq: number } | null;
+  onCompose?: () => void;
 }
 
 /** Cursor/Copilot-style inline prompt for the exact selection (or current line/cell). */
-export default function InlineEdit({ state, onSubmit, onAccept, onCancel, onClose }: Props) {
+export default function InlineEdit({ state, onSubmit, onAccept, onCancel, onClose, incoming, onCompose }: Props) {
   const { t } = useI18n();
   const [text, setText] = useState("");
   const ref = useRef<HTMLTextAreaElement>(null);
+  useEffect(() => {
+    if (incoming) setText((v) => (v.trim() ? v + "\n" + incoming.text : incoming.text));
+  }, [incoming?.seq]); // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => {
     if (state.open) setTimeout(() => ref.current?.focus(), 0);
   }, [state.open]);
@@ -49,6 +55,9 @@ export default function InlineEdit({ state, onSubmit, onAccept, onCancel, onClos
               <span className="shimmer-text">{t("status.applying")}</span>
             </span>
           )}
+          {onCompose && (
+            <button type="button" onClick={onCompose} data-tip={t("compose.open")} className="rounded border border-gray-500/25 px-1 text-[10px] text-gray-500 hover:bg-gray-500/10">⌨ Web</button>
+          )}
           <kbd className="rounded border border-gray-500/25 px-1 text-[10px] text-gray-500">{shortcutLabel}</kbd>
           <IconButton tip={t("common.closeEsc")} onClick={onClose}><IconX /></IconButton>
         </div>
@@ -58,8 +67,8 @@ export default function InlineEdit({ state, onSubmit, onAccept, onCancel, onClos
         <div className="flex items-end gap-1 rounded-lg border border-gray-500/25 p-1.5 focus-within:border-indigo-500/60">
           <textarea
             ref={ref}
-            className="max-h-24 min-h-[34px] flex-1 text-[12px] placeholder:text-gray-400"
-            rows={2}
+            className="min-h-[104px] flex-1 text-[12px] leading-[1.6] placeholder:text-gray-400"
+            rows={5}
             value={text}
             disabled={state.busy}
             placeholder={t("inline.placeholder")}

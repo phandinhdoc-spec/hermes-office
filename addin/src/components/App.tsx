@@ -134,6 +134,7 @@ export default function App() {
   const [toolsets, setToolsets] = useState<ToolsetInfo[]>([]);
   const [toolResults, setToolResults] = useState<Record<string, { ok: boolean; result: unknown }>>({});
   const [inline, setInline] = useState<InlineState>(INLINE_IDLE);
+  const [composeIn, setComposeIn] = useState<{ text: string; seq: number } | null>(null);
   const inlineId = useRef<string | null>(null);
   const inlineTarget = useRef<InlineTarget>({ text: "", scope: "selection" });
   const inlineAuto = useRef(false);
@@ -185,6 +186,13 @@ export default function App() {
       return;
     }
     switch (e.type) {
+      case "compose":
+        if (e.target === "inline") setComposeIn({ text: e.text, seq: Date.now() });
+        else {
+          setInput((v) => (v.trim() ? v + "\n" + e.text : e.text));
+          setTimeout(() => taRef.current?.focus(), 0);
+        }
+        break;
       case "status":
         setHermes(e.hermes);
         break;
@@ -285,12 +293,6 @@ export default function App() {
   }, [msgs, busy]);
 
   const taRef = useRef<HTMLTextAreaElement>(null);
-  useEffect(() => {
-    const el = taRef.current;
-    if (!el) return;
-    el.style.height = "auto";
-    el.style.height = Math.min(el.scrollHeight, 160) + "px";
-  }, [input]);
 
   const send = async (override?: string) => {
     const text = (override ?? input).trim();
@@ -622,10 +624,10 @@ export default function App() {
           <textarea
             ref={taRef}
             value={input}
-            rows={1}
+            rows={5}
             onChange={(e) => setInput(e.target.value)}
             placeholder={t("composer.placeholder")}
-            className="block max-h-40 w-full px-2.5 pb-0.5 pt-2 text-[13px] placeholder:text-gray-400"
+            className="block min-h-[110px] w-full px-2.5 pb-1 pt-2 text-[13px] leading-[1.6] placeholder:text-gray-400"
             onKeyDown={(e) => {
               if (e.key === "Enter" && !e.shiftKey && !isImeKey(e)) {
                 e.preventDefault();
@@ -640,6 +642,16 @@ export default function App() {
             ))}
             {activeSkills.length > 2 && <Pill tone="accent" onClick={() => setSkillsOpen(true)} tip={t("skills.manage")}>+{activeSkills.length - 2}</Pill>}
             <span className="flex-1" />
+            <button
+              type="button"
+              onClick={() => safeSend({ type: "open_compose", target: "chat", lang })}
+              data-tip={t("compose.open")}
+              data-tip-up=""
+              aria-label={t("compose.open")}
+              className="inline-flex h-6 items-center justify-center rounded-md px-1.5 text-[11px] text-gray-500 hover:bg-gray-500/15"
+            >
+              ⌨ Web
+            </button>
             <button
               type="button"
               onClick={() => setUseSelection((v) => !v)}
@@ -702,6 +714,8 @@ export default function App() {
       />
       <InlineEdit
         state={inline}
+        incoming={composeIn}
+        onCompose={() => safeSend({ type: "open_compose", target: "inline", lang })}
         onSubmit={submitInline}
         onAccept={() => void applyInline(inline.output)}
         onCancel={cancelInline}
