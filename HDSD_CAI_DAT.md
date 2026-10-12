@@ -36,18 +36,6 @@ Trong quá trình cài, chương trình sẽ **hỏi bạn** những câu đơn 
 
 Khi macOS hỏi mật khẩu để tin cậy chứng chỉ → nhập mật khẩu máy của bạn. Sau đó **tắt hẳn và mở lại** Word/Excel/PowerPoint.
 
-## Linux
-
-Mở Terminal tại thư mục dự án và chạy:
-
-```bash
-./install.sh
-```
-
-Script cần `curl`, `python3` và `node` (nếu thiếu, cài bằng trình quản lý gói của bản Linux của bạn, ví dụ `sudo apt install curl python3 python3-venv nodejs npm`). Office chạy trên Linux qua Office Online/Wine; hãy thêm `manifest.xml` theo cách upload tiện ích của Office.
-
-Linux không có Microsoft Office, nên khi chưa thấy bộ văn phòng nào, script sẽ hỏi có cài **LibreOffice** (Writer, Calc, Impress) không và tự cài bằng `apt`, `dnf`, `pacman`, `zypper` hoặc `flatpak` (cần `sudo`). Muốn chạy riêng bước này: `./install.sh office`. Lưu ý: tiện ích Hermes là add-in của Microsoft Office, LibreOffice không chạy được add-in này; để dùng tiện ích, hãy mở Word/Excel/PowerPoint bản web (Office Online) trong trình duyệt.
-
 ---
 
 ## Đăng nhập Google ngay trong Word / Excel / PowerPoint
@@ -79,4 +67,4 @@ Mô hình AI: **Gemini 3.8 Flash** trả lời nhanh khi bạn sửa nhanh (phí
 2. Trong Word: **File → Options → Trust Center → Trust Center Settings → Trusted Add-in Catalogs**, dán đường dẫn chia sẻ dạng `\\TÊN-MÁY\HermesCatalog`, tích **Show in Menu**, bấm OK, khởi động lại Word.
 
 ### Gỡ cài đặt
-`./install.sh uninstall` (macOS/Linux/Git Bash).
+`./install.sh uninstall` (macOS/Git Bash).

@@ -1,12 +1,11 @@
 #!/usr/bin/env bash
-# Hermes Office setup / sideload / daemon CLI (macOS; service commands also Linux + Windows Git Bash).
+# Hermes Office setup / sideload / daemon CLI (macOS; service commands also Windows Git Bash).
 #
 #   ./install.sh [install]   certs + deps + manifest sideload + install and start the background service
 #   ./install.sh certs       (re)generate and trust the localhost dev certificate
 #   ./install.sh sideload    copy manifest.xml into the Word/Excel/PowerPoint wef folders (macOS)
 #   ./install.sh uninstall   remove the service and the sideloaded manifests (keeps certs)
 #   ./install.sh status      show what is installed
-#   ./install.sh office      (Linux) install LibreOffice when no office suite is present
 #   ./install.sh plugin      enable the Hermes plugin antigravity-subscription-directsdk (agy installed + signed in first)
 #   ./install.sh start       run bridge + Vite dev server together (development)
 #
@@ -15,7 +14,7 @@
 #   ./install.sh service-uninstall   stop and remove the daemon
 #   ./install.sh service-status | service-start | service-stop | service-restart
 #
-# Service: macOS LaunchAgent (com.hermes.office), Linux systemd --user unit, Windows scheduled task.
+# Service: macOS LaunchAgent (com.hermes.office), Windows scheduled task.
 # Flags: --no-trust    skip adding the cert to the trust store
 #        --no-service  with install: do not install the background service
 #        --yes | -y    non-interactive: answer "yes" to every question
@@ -36,7 +35,6 @@ LABEL="com.hermes.office"
 TASK_NAME="HermesOffice"
 LOG_DIR="$HOME/.hermes-office"
 PLIST="$HOME/Library/LaunchAgents/$LABEL.plist"
-UNIT="$HOME/.config/systemd/user/hermes-office.service"
 
 ASSUME_YES=0
 LANG_UI=""
@@ -63,7 +61,7 @@ die() { printf '\033[1;31mxx\033[0m %s\n' "$*" >&2; exit 1; }
 
 case "$(uname -s)" in
   Darwin) OS=mac ;;
-  Linux) OS=linux ;;
+  Linux) die "Linux is not supported by this installer (macOS and Windows only)." ;;
   MINGW*|MSYS*|CYGWIN*) OS=windows ;;
   *) die "unsupported OS: $(uname -s)" ;;
 esac
@@ -129,46 +127,10 @@ setup_agents() {
     if [ -n "$AGY_INSTALL_URL" ]; then run_remote_installer "$AGY_INSTALL_URL" || warn "Antigravity: $(tr_ 'cai that bai' 'install failed')"
     else
       warn "$(tr_ "Hay tai Antigravity tai: $AGY_DOWNLOAD_PAGE (khong bat buoc de dung tien ich)." "Please download Antigravity from: $AGY_DOWNLOAD_PAGE (not required to use the add-in).")"
-      case "$OS" in mac) command -v open >/dev/null && open "$AGY_DOWNLOAD_PAGE" || true ;; linux) command -v xdg-open >/dev/null && xdg-open "$AGY_DOWNLOAD_PAGE" >/dev/null 2>&1 || true ;; esac
+      case "$OS" in mac) command -v open >/dev/null && open "$AGY_DOWNLOAD_PAGE" || true ; ;; esac
     fi
   fi
   enable_plugin
-}
-
-libreoffice_present() { command -v soffice >/dev/null 2>&1 || command -v libreoffice >/dev/null 2>&1; }
-
-# Linux has no Microsoft Office: offer LibreOffice (Writer/Calc/Impress) instead.
-# Uses the distro's package manager (sudo needed unless already root).
-setup_office() {
-  [ "$OS" = linux ] || return 0
-  if libreoffice_present; then
-    say "LibreOffice: $(tr_ 'da co' 'already installed')"
-    return 0
-  fi
-  say "$(tr_ 'Linux khong co Microsoft Office. Co the cai LibreOffice (Writer, Calc, Impress) de thay the.' 'Linux has no Microsoft Office. LibreOffice (Writer, Calc, Impress) can be installed instead.')"
-  ask "Ban co muon cai LibreOffice khong?" "Install LibreOffice?" || { warn "$(tr_ 'Bo qua LibreOffice.' 'Skipped LibreOffice.')"; return 0; }
-  local sudo_=""
-  if [ "$(id -u)" != 0 ]; then
-    command -v sudo >/dev/null || { warn "$(tr_ 'Can sudo hoac quyen root de cai LibreOffice.' 'sudo or root is required to install LibreOffice.')"; return 0; }
-    sudo_="sudo"
-  fi
-  local rc=0
-  if command -v apt-get >/dev/null; then
-    $sudo_ apt-get update && $sudo_ apt-get install -y libreoffice-writer libreoffice-calc libreoffice-impress libreoffice-l10n-vi || rc=$?
-  elif command -v dnf >/dev/null; then
-    $sudo_ dnf install -y libreoffice-writer libreoffice-calc libreoffice-impress libreoffice-langpack-vi || rc=$?
-  elif command -v pacman >/dev/null; then
-    $sudo_ pacman -S --needed --noconfirm libreoffice-fresh || rc=$?
-  elif command -v zypper >/dev/null; then
-    $sudo_ zypper --non-interactive install libreoffice-writer libreoffice-calc libreoffice-impress || rc=$?
-  elif command -v flatpak >/dev/null; then
-    flatpak install -y flathub org.libreoffice.LibreOffice || rc=$?
-  else
-    warn "$(tr_ 'Khong nhan ra trinh quan ly goi. Hay cai LibreOffice thu cong: https://www.libreoffice.org/download/' 'Unknown package manager. Install LibreOffice manually: https://www.libreoffice.org/download/')"
-    return 0
-  fi
-  if [ "$rc" = 0 ]; then say "$(tr_ 'Da cai LibreOffice.' 'LibreOffice installed.')"
-  else warn "$(tr_ 'Cai LibreOffice chua thanh cong. Ban co the cai lai bang tay.' 'LibreOffice install did not finish. You can install it manually.')"; fi
 }
 
 hermes_bin() {
@@ -333,31 +295,6 @@ EOF
       launchctl bootout "gui/$(id -u)" "$PLIST" >/dev/null 2>&1 || true
       launchctl bootstrap "gui/$(id -u)" "$PLIST" || die "launchctl bootstrap failed"
       launchctl kickstart -k "gui/$(id -u)/$LABEL" >/dev/null 2>&1 || true ;;
-    linux)
-      command -v systemctl >/dev/null || die "systemd not found; run '$VENV_PY $ROOT/bridge/hermes_office_bridge.py' from your init system"
-      mkdir -p "$(dirname "$UNIT")"
-      cat > "$UNIT" <<EOF
-[Unit]
-Description=Hermes Office bridge + add-in server
-
-[Service]
-ExecStart="$VENV_PY" "$ROOT/bridge/hermes_office_bridge.py" --port $PORT
-WorkingDirectory=$ROOT/bridge
-Environment=PATH=$HOME/.local/bin:$HOME/.hermes/hermes-agent/.hermes/bin:/usr/local/bin:/usr/bin:/bin
-Environment=LANG=C.UTF-8
-Environment=PYTHONUTF8=1
-Restart=always
-RestartSec=2
-StandardOutput=append:$LOG_DIR/bridge.log
-StandardError=append:$LOG_DIR/bridge.log
-
-[Install]
-WantedBy=default.target
-EOF
-      systemctl --user daemon-reload
-      systemctl --user enable hermes-office.service >/dev/null 2>&1
-      systemctl --user restart hermes-office.service
-      if command -v loginctl >/dev/null; then loginctl enable-linger "$USER" >/dev/null 2>&1 || true; fi ;;
     windows)
       local pyw script
       pyw="$(cygpath -w "$VENV_PYW")"; script="$(cygpath -w "$ROOT/bridge/hermes_office_bridge.py")"
@@ -375,7 +312,6 @@ service_stop() {
     mac)
       # bootout unloads the job so KeepAlive does not respawn it; service-start re-bootstraps.
       launchctl bootout "gui/$(id -u)" "$PLIST" >/dev/null 2>&1 || true ;;
-    linux) systemctl --user stop hermes-office.service >/dev/null 2>&1 || true ;;
     windows) schtasks_ /End /TN "$TASK_NAME" >/dev/null 2>&1 || true ;;
   esac
   say "Service stopped"
@@ -385,9 +321,6 @@ service_uninstall() {
   service_stop
   case "$OS" in
     mac) rm -f "$PLIST" ;;
-    linux)
-      systemctl --user disable hermes-office.service >/dev/null 2>&1 || true
-      rm -f "$UNIT"; systemctl --user daemon-reload >/dev/null 2>&1 || true ;;
     windows) schtasks_ /Delete /F /TN "$TASK_NAME" >/dev/null 2>&1 || true ;;
   esac
   say "Service removed"
@@ -399,7 +332,6 @@ service_start() {
       [ -f "$PLIST" ] || die "service not installed; run ./install.sh service-install"
       launchctl bootstrap "gui/$(id -u)" "$PLIST" >/dev/null 2>&1 || true
       launchctl kickstart "gui/$(id -u)/$LABEL" >/dev/null 2>&1 || true ;;
-    linux) systemctl --user start hermes-office.service || die "service not installed; run ./install.sh service-install" ;;
     windows) schtasks_ /Run /TN "$TASK_NAME" >/dev/null || die "service not installed; run ./install.sh service-install" ;;
   esac
   if wait_healthy; then say "Service started"; else warn "Service not healthy yet; see $LOG_DIR/bridge.log"; fi
@@ -411,9 +343,6 @@ service_status() {
     mac)
       [ -f "$PLIST" ] && installed=yes
       launchctl print "gui/$(id -u)/$LABEL" >/dev/null 2>&1 && manager=loaded ;;
-    linux)
-      [ -f "$UNIT" ] && installed=yes
-      systemctl --user is-active --quiet hermes-office.service && manager=active ;;
     windows)
       schtasks_ /Query /TN "$TASK_NAME" >/dev/null 2>&1 && installed=yes ;;
   esac
@@ -433,7 +362,6 @@ do_status() {
   [ -f "$CERT_DIR/localhost.crt" ] && echo "cert: $CERT_DIR/localhost.crt" || echo "cert: missing"
   service_status
   if hermes_present; then echo "hermes: installed"; else echo "hermes: NOT found"; fi
-  if [ "$OS" = linux ]; then if libreoffice_present; then echo "libreoffice: installed"; else echo "libreoffice: NOT found (optional; ./install.sh office)"; fi; fi
   if agy_present; then echo "agy: installed"; else echo "agy: NOT found (optional)"; fi
   if [ -n "$HERMES_AGY_PLUGIN" ]; then
     if [ "$(cat "$PLUGIN_MARKER" 2>/dev/null || true)" = "$HERMES_AGY_PLUGIN" ]; then echo "plugin $HERMES_AGY_PLUGIN: enabled"; else echo "plugin $HERMES_AGY_PLUGIN: not enabled (needs agy signed in; run ./install.sh plugin)"; fi
@@ -453,12 +381,11 @@ do_start() {
 }
 
 case "$CMD" in
-  install)   setup_office; setup_agents; do_certs; do_deps; do_sideload; if [ "$SERVICE" = 1 ]; then service_install; fi; do_status; final_message ;;
+  install)   setup_agents; do_certs; do_deps; do_sideload; if [ "$SERVICE" = 1 ]; then service_install; fi; do_status; final_message ;;
   certs)     do_certs ;;
   sideload)  do_sideload ;;
   uninstall) service_uninstall; do_uninstall ;;
   status)    do_status ;;
-  office)    setup_office ;;
   plugin)    enable_plugin ;;
   start)     do_start ;;
   service-install)   service_install ;;

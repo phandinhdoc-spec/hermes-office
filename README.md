@@ -14,7 +14,7 @@ Extension / Add-in cho Microsoft Office (**Word**, **Excel**, **PowerPoint**) k�
    - Tự động phát hiện ký hiệu LaTeX (`$...$`, `$$...$$`, `\[...\]`) và công thức Hóa học (`\ce{...}` như `\ce{CaCO3 -> CaO + CO2 ^}`, `\ce{H2SO4}`).
    - Tự động chuyển đổi sang đối tượng **Equation chuẩn của Microsoft Word** (OMML) thay vì dán text thô.
 3. **Chỉnh sửa dòng nhanh (Inline Edit) bằng phím tắt `F6`**:
-   - Bấm **`F6`** (trên macOS / Windows / Linux) để mở thanh sửa nhanh dòng/đoạn đang chọn.
+   - Bấm **`F6`** (trên macOS / Windows) để mở thanh sửa nhanh dòng/đoạn đang chọn.
    - Nhập yêu cầu chỉnh sửa, xem trước (Preview Diff) và thay thế tức thì vào văn bản.
 4. **Bảng điều khiển đa năng (Sleek Task Pane UI)**:
    - **Đa ngôn ngữ**: Nút gạt chuyển đổi **Viet / Eng** linh hoạt, mặc định tiếng Việt cho người dùng Việt Nam.
@@ -31,7 +31,7 @@ Extension / Add-in cho Microsoft Office (**Word**, **Excel**, **PowerPoint**) k�
 
 ## 🚀 Cài đặt nhanh (Quick Start)
 
-> 👉 **Người dùng không rành máy tính:** xem [`HDSD_CAI_DAT.md`](HDSD_CAI_DAT.md) — chỉ cần nhấp đúp `install.bat` (Windows) hoặc `install.command` (macOS), hoặc chạy `./install.sh` (Linux). Script tự hỏi, tự tải Hermes Agent / Antigravity, rồi bạn **đăng nhập Gmail ngay trong tiện ích**.
+> 👉 **Người dùng không rành máy tính:** xem [`HDSD_CAI_DAT.md`](HDSD_CAI_DAT.md) — chỉ cần nhấp đúp `install.bat` (Windows) hoặc `install.command` (macOS). Script tự hỏi, tự tải Hermes Agent / Antigravity, rồi bạn **đăng nhập Gmail ngay trong tiện ích**.
 
 ### Yêu cầu tiên quyết
 - **Hermes CLI** (`hermes`): script cài đặt sẽ hỏi và tự tải nếu chưa có; **Antigravity (`agy`)** là tùy chọn.

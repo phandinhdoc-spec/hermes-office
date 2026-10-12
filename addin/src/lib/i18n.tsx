@@ -20,7 +20,7 @@ const en = {
   "auth.noHermes.body": "Hermes Agent is the engine behind this add-in. Install it with one click (about 1–2 minutes).",
   "auth.install": "Install Hermes Agent automatically",
   "auth.installing": "Installing… please do not close this window",
-  "auth.manual": "Automatic install is not available on this system. Run install.bat (Windows) or ./install.sh (macOS/Linux) once; see HDSD_CAI_DAT.md.",
+  "auth.manual": "Automatic install is not available on this system. Run install.bat (Windows) or ./install.command (macOS) once; see HDSD_CAI_DAT.md.",
   "banner.signIn": "Not signed in to Google — click to sign in",
   "lang.switch": "Switch language (Vietnamese / English)",
 
@@ -174,7 +174,7 @@ const vi: Record<Key, string> = {
   "auth.noHermes.body": "Hermes Agent là bộ máy chạy phía sau tiện ích này. Bấm nút bên dưới để cài tự động (khoảng 1–2 phút).",
   "auth.install": "Cài Hermes Agent tự động",
   "auth.installing": "Đang cài đặt… vui lòng không đóng cửa sổ này",
-  "auth.manual": "Hệ thống này chưa hỗ trợ cài tự động. Hãy chạy install.bat (Windows) hoặc ./install.sh (macOS/Linux) một lần; xem HDSD_CAI_DAT.md.",
+  "auth.manual": "Hệ thống này chưa hỗ trợ cài tự động. Hãy chạy install.bat (Windows) hoặc ./install.command (macOS) một lần; xem HDSD_CAI_DAT.md.",
   "banner.signIn": "Chưa đăng nhập Google — bấm để đăng nhập",
   "lang.label": "Ngôn ngữ",
   "lang.switch": "Đổi ngôn ngữ (Tiếng Việt / English)",
