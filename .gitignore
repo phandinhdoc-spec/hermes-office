@@ -1,3 +1,4 @@
+<<<<<<< HEAD
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[codz]
@@ -218,3 +219,34 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+=======
+# Dependencies
+node_modules/
+.venv/
+venv/
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.pytest_cache/
+
+# Build outputs
+addin/dist/
+*.tsbuildinfo
+
+# Environment & secrets
+.env
+*.pem
+*.key
+*.crt
+*.pfx
+.hermes-office/certs/
+
+# OS & IDE
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+*.swp
+*.swo
+>>>>>>> 171d95e (Initial commit: Hermes for Office extension complete implementation with Vietnamese documentation)
