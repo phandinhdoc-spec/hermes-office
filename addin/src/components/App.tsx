@@ -15,6 +15,7 @@ import { useI18n, type Key } from "../lib/i18n";
 import { currentHost } from "../office/host";
 import { applyInlineEdit, getInlineTarget, getSelectionText, replaceSelectionText, type InlineTarget } from "../office/tools";
 import { isImeKey, shortcutLabel, useInlineShortcut } from "../hooks/useInlineShortcut";
+import ImeTextarea, { type ImeTextareaHandle } from "./ImeTextarea";
 import InlineEdit, { type InlineState } from "./InlineEdit";
 import LoginModal, { type AuthProgress } from "./LoginModal";
 import ModelSelector from "./ModelSelector";
@@ -110,7 +111,8 @@ export default function App() {
   const [conn, setConn] = useState<ConnState>("connecting");
   const [hermes, setHermes] = useState<HermesStatus | null>(null);
   const [msgs, setMsgs] = useState<Msg[]>(loadHistory);
-  const [input, setInput] = useState("");
+  // Nội dung ô chat nằm trong DOM (ImeTextarea, uncontrolled) để không làm hỏng bộ gõ tiếng Việt; state chỉ giữ cờ "có chữ".
+  const [hasInput, setHasInput] = useState(false);
   const [useSelection, setUseSelection] = useState(true);
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -189,7 +191,7 @@ export default function App() {
       case "compose":
         if (e.target === "inline") setComposeIn({ text: e.text, seq: Date.now() });
         else {
-          setInput((v) => (v.trim() ? v + "\n" + e.text : e.text));
+          taRef.current?.append(e.text);
           setTimeout(() => taRef.current?.focus(), 0);
         }
         break;
@@ -292,10 +294,10 @@ export default function App() {
     if (stick.current) endRef.current?.scrollIntoView({ block: "end" });
   }, [msgs, busy]);
 
-  const taRef = useRef<HTMLTextAreaElement>(null);
+  const taRef = useRef<ImeTextareaHandle>(null);
 
   const send = async (override?: string) => {
-    const text = (override ?? input).trim();
+    const text = (override ?? taRef.current?.getValue() ?? "").trim();
     if (!text || busy) return;
     stick.current = true;
     setError(null);
@@ -310,7 +312,7 @@ export default function App() {
     }
     const id = crypto.randomUUID();
     setMsgs((m) => [...m, { id: id + "-u", role: "user", text }]);
-    setInput("");
+    taRef.current?.setValue("");
     setBusy(id);
     try {
       client.current?.send({ type: "chat", id, text, host: currentHost(), context });
@@ -442,7 +444,7 @@ export default function App() {
         : null;
   const connTone = conn === "open" ? "ok" : conn === "connecting" ? "warn" : "bad";
   const chat = tab === "chat";
-  const canSend = !!input.trim() && !busy && conn === "open";
+  const canSend = hasInput && !busy && conn === "open";
   const last = msgs.length - 1;
   const selectable = msgs.flatMap((m, i) => (m.pending || (busy && i === last) ? [] : [i]));
 
@@ -621,11 +623,10 @@ export default function App() {
           ))}
         </div>
         <div className="rounded-xl border border-gray-500/30 bg-gray-500/[0.04] focus-within:border-indigo-500/60 focus-within:shadow-[0_0_0_3px_rgba(99,102,241,.12)]">
-          <textarea
+          <ImeTextarea
             ref={taRef}
-            value={input}
             rows={5}
-            onChange={(e) => setInput(e.target.value)}
+            onTextChange={(v) => setHasInput(!!v.trim())}
             placeholder={t("composer.placeholder")}
             className="block min-h-[110px] w-full px-2.5 pb-1 pt-2 text-[13px] leading-[1.6] placeholder:text-gray-400"
             onKeyDown={(e) => {

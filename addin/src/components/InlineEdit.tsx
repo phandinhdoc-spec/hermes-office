@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { useI18n } from "../lib/i18n";
 import { isImeKey, shortcutLabel } from "../hooks/useInlineShortcut";
+import ImeTextarea, { type ImeTextareaHandle } from "./ImeTextarea";
 import { IconButton, IconCheck, IconSend, IconStop, IconX, btnGhost, btnPrimary, card } from "./ui";
 
 export interface InlineState {
@@ -26,10 +27,18 @@ interface Props {
 /** Cursor/Copilot-style inline prompt for the exact selection (or current line/cell). */
 export default function InlineEdit({ state, onSubmit, onAccept, onCancel, onClose, incoming, onCompose }: Props) {
   const { t } = useI18n();
-  const [text, setText] = useState("");
-  const ref = useRef<HTMLTextAreaElement>(null);
+  // Ô nhập là uncontrolled (ImeTextarea) để bộ gõ tiếng Việt không bị React ghi đè; `draft` giữ bản nháp khi đóng/mở lại.
+  const [hasText, setHasText] = useState(false);
+  const draft = useRef("");
+  const ref = useRef<ImeTextareaHandle>(null);
+  const onTextChange = (v: string) => {
+    draft.current = v;
+    setHasText(!!v.trim());
+  };
   useEffect(() => {
-    if (incoming) setText((v) => (v.trim() ? v + "\n" + incoming.text : incoming.text));
+    if (!incoming) return;
+    if (ref.current) ref.current.append(incoming.text);
+    else onTextChange(draft.current.trim() ? draft.current + "\n" + incoming.text : incoming.text);
   }, [incoming?.seq]); // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => {
     if (state.open) setTimeout(() => ref.current?.focus(), 0);
@@ -65,18 +74,18 @@ export default function InlineEdit({ state, onSubmit, onAccept, onCancel, onClos
           {state.target || t("inline.empty")}
         </pre>
         <div className="flex items-end gap-1 rounded-lg border border-gray-500/25 p-1.5 focus-within:border-indigo-500/60">
-          <textarea
+          <ImeTextarea
             ref={ref}
             className="min-h-[104px] flex-1 text-[12px] leading-[1.6] placeholder:text-gray-400"
             rows={5}
-            value={text}
+            defaultValue={draft.current}
             disabled={state.busy}
             placeholder={t("inline.placeholder")}
-            onChange={(e) => setText(e.target.value)}
+            onTextChange={onTextChange}
             onKeyDown={(e) => {
-              if (e.key === "Enter" && !e.shiftKey && !isImeKey(e) && text.trim()) {
+              if (e.key === "Enter" && !e.shiftKey && !isImeKey(e) && draft.current.trim()) {
                 e.preventDefault();
-                onSubmit(text.trim(), e.metaKey || e.ctrlKey);
+                onSubmit(draft.current.trim(), e.metaKey || e.ctrlKey);
               }
             }}
           />
@@ -86,8 +95,8 @@ export default function InlineEdit({ state, onSubmit, onAccept, onCancel, onClos
             <button
               type="button"
               aria-label={t("inline.generate")}
-              disabled={!text.trim()}
-              onClick={() => onSubmit(text.trim(), false)}
+              disabled={!hasText}
+              onClick={() => onSubmit(draft.current.trim(), false)}
               className="inline-flex h-6 w-6 items-center justify-center rounded-md bg-indigo-600 text-white hover:bg-indigo-500 disabled:opacity-40"
             >
               <IconSend />
@@ -103,7 +112,7 @@ export default function InlineEdit({ state, onSubmit, onAccept, onCancel, onClos
         {hasOutput && (
           <div className="flex gap-1.5">
             <button type="button" className={btnPrimary} onClick={onAccept}><IconCheck className="h-3 w-3" />{t("inline.accept")}</button>
-            <button type="button" className={btnGhost} onClick={() => onSubmit(text.trim(), false)} disabled={!text.trim()}>{t("inline.retry")}</button>
+            <button type="button" className={btnGhost} onClick={() => onSubmit(draft.current.trim(), false)} disabled={!hasText}>{t("inline.retry")}</button>
             <button type="button" className={btnGhost} onClick={onClose}>{t("inline.discard")}</button>
           </div>
         )}
