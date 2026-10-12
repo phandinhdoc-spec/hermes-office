@@ -1263,11 +1263,12 @@ async def static_files(path: str = "") -> FileResponse:
     target = (root / (path or "index.html")).resolve()
     if root not in target.parents and target != root:
         raise HTTPException(404)
+    nocache = {"Cache-Control": "no-cache, must-revalidate"}  # Office WebViews cache hard; always revalidate so fixes show up
     if target.is_file():
-        return FileResponse(target)
+        return FileResponse(target, headers=nocache)
     if "." in Path(path).name:  # missing asset: real 404, not the SPA shell
         raise HTTPException(404)
-    return FileResponse(root / "index.html")
+    return FileResponse(root / "index.html", headers=nocache)
 
 
 def main() -> None:
