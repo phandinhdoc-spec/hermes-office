@@ -6,6 +6,7 @@
 #   ./install.sh sideload    copy manifest.xml into the Word/Excel/PowerPoint wef folders (macOS)
 #   ./install.sh uninstall   remove the service and the sideloaded manifests (keeps certs)
 #   ./install.sh status      show what is installed
+#   ./install.sh office      (Linux) install LibreOffice when no office suite is present
 #   ./install.sh plugin      enable the Hermes plugin antigravity-subscription-directsdk (agy installed + signed in first)
 #   ./install.sh start       run bridge + Vite dev server together (development)
 #
@@ -132,6 +133,42 @@ setup_agents() {
     fi
   fi
   enable_plugin
+}
+
+libreoffice_present() { command -v soffice >/dev/null 2>&1 || command -v libreoffice >/dev/null 2>&1; }
+
+# Linux has no Microsoft Office: offer LibreOffice (Writer/Calc/Impress) instead.
+# Uses the distro's package manager (sudo needed unless already root).
+setup_office() {
+  [ "$OS" = linux ] || return 0
+  if libreoffice_present; then
+    say "LibreOffice: $(tr_ 'da co' 'already installed')"
+    return 0
+  fi
+  say "$(tr_ 'Linux khong co Microsoft Office. Co the cai LibreOffice (Writer, Calc, Impress) de thay the.' 'Linux has no Microsoft Office. LibreOffice (Writer, Calc, Impress) can be installed instead.')"
+  ask "Ban co muon cai LibreOffice khong?" "Install LibreOffice?" || { warn "$(tr_ 'Bo qua LibreOffice.' 'Skipped LibreOffice.')"; return 0; }
+  local sudo_=""
+  if [ "$(id -u)" != 0 ]; then
+    command -v sudo >/dev/null || { warn "$(tr_ 'Can sudo hoac quyen root de cai LibreOffice.' 'sudo or root is required to install LibreOffice.')"; return 0; }
+    sudo_="sudo"
+  fi
+  local rc=0
+  if command -v apt-get >/dev/null; then
+    $sudo_ apt-get update && $sudo_ apt-get install -y libreoffice-writer libreoffice-calc libreoffice-impress libreoffice-l10n-vi || rc=$?
+  elif command -v dnf >/dev/null; then
+    $sudo_ dnf install -y libreoffice-writer libreoffice-calc libreoffice-impress libreoffice-langpack-vi || rc=$?
+  elif command -v pacman >/dev/null; then
+    $sudo_ pacman -S --needed --noconfirm libreoffice-fresh || rc=$?
+  elif command -v zypper >/dev/null; then
+    $sudo_ zypper --non-interactive install libreoffice-writer libreoffice-calc libreoffice-impress || rc=$?
+  elif command -v flatpak >/dev/null; then
+    flatpak install -y flathub org.libreoffice.LibreOffice || rc=$?
+  else
+    warn "$(tr_ 'Khong nhan ra trinh quan ly goi. Hay cai LibreOffice thu cong: https://www.libreoffice.org/download/' 'Unknown package manager. Install LibreOffice manually: https://www.libreoffice.org/download/')"
+    return 0
+  fi
+  if [ "$rc" = 0 ]; then say "$(tr_ 'Da cai LibreOffice.' 'LibreOffice installed.')"
+  else warn "$(tr_ 'Cai LibreOffice chua thanh cong. Ban co the cai lai bang tay.' 'LibreOffice install did not finish. You can install it manually.')"; fi
 }
 
 hermes_bin() {
@@ -396,6 +433,7 @@ do_status() {
   [ -f "$CERT_DIR/localhost.crt" ] && echo "cert: $CERT_DIR/localhost.crt" || echo "cert: missing"
   service_status
   if hermes_present; then echo "hermes: installed"; else echo "hermes: NOT found"; fi
+  if [ "$OS" = linux ]; then if libreoffice_present; then echo "libreoffice: installed"; else echo "libreoffice: NOT found (optional; ./install.sh office)"; fi; fi
   if agy_present; then echo "agy: installed"; else echo "agy: NOT found (optional)"; fi
   if [ -n "$HERMES_AGY_PLUGIN" ]; then
     if [ "$(cat "$PLUGIN_MARKER" 2>/dev/null || true)" = "$HERMES_AGY_PLUGIN" ]; then echo "plugin $HERMES_AGY_PLUGIN: enabled"; else echo "plugin $HERMES_AGY_PLUGIN: not enabled (needs agy signed in; run ./install.sh plugin)"; fi
@@ -415,11 +453,12 @@ do_start() {
 }
 
 case "$CMD" in
-  install)   setup_agents; do_certs; do_deps; do_sideload; if [ "$SERVICE" = 1 ]; then service_install; fi; do_status; final_message ;;
+  install)   setup_office; setup_agents; do_certs; do_deps; do_sideload; if [ "$SERVICE" = 1 ]; then service_install; fi; do_status; final_message ;;
   certs)     do_certs ;;
   sideload)  do_sideload ;;
   uninstall) service_uninstall; do_uninstall ;;
   status)    do_status ;;
+  office)    setup_office ;;
   plugin)    enable_plugin ;;
   start)     do_start ;;
   service-install)   service_install ;;

@@ -46,6 +46,8 @@ Mở Terminal tại thư mục dự án và chạy:
 
 Script cần `curl`, `python3` và `node` (nếu thiếu, cài bằng trình quản lý gói của bản Linux của bạn, ví dụ `sudo apt install curl python3 python3-venv nodejs npm`). Office chạy trên Linux qua Office Online/Wine; hãy thêm `manifest.xml` theo cách upload tiện ích của Office.
 
+Linux không có Microsoft Office, nên khi chưa thấy bộ văn phòng nào, script sẽ hỏi có cài **LibreOffice** (Writer, Calc, Impress) không và tự cài bằng `apt`, `dnf`, `pacman`, `zypper` hoặc `flatpak` (cần `sudo`). Muốn chạy riêng bước này: `./install.sh office`. Lưu ý: tiện ích Hermes là add-in của Microsoft Office, LibreOffice không chạy được add-in này; để dùng tiện ích, hãy mở Word/Excel/PowerPoint bản web (Office Online) trong trình duyệt.
+
 ---
 
 ## Đăng nhập Google ngay trong Word / Excel / PowerPoint
