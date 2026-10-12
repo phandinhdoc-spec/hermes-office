@@ -169,20 +169,35 @@ enable_plugin() {
 wef_dir() { echo "$HOME/Library/Containers/com.microsoft.$1/Data/Documents/wef"; }
 
 do_certs() {
-  command -v openssl >/dev/null || die "openssl not found"
-  mkdir -p "$CERT_DIR"
+  command -v openssl >/dev/null || die "openssl not found (on Windows it ships with Git for Windows: <Git>\\usr\\bin\\openssl.exe)"
+  mkdir -p "$CERT_DIR" "$LOG_DIR"
   if [ -f "$CERT_DIR/localhost.crt" ] && openssl x509 -checkend 2592000 -noout -in "$CERT_DIR/localhost.crt" >/dev/null 2>&1; then
     say "Dev cert already valid: $CERT_DIR/localhost.crt"
   else
     say "Generating self-signed cert for localhost / 127.0.0.1"
-    openssl req -x509 -newkey rsa:2048 -nodes -sha256 -days 825 \
-      -keyout "$CERT_DIR/localhost.key" -out "$CERT_DIR/localhost.crt" \
-      -subj "/CN=localhost/O=Hermes Office Dev" \
-      -addext "subjectAltName=DNS:localhost,IP:127.0.0.1" \
-      -addext "basicConstraints=critical,CA:TRUE" \
-      -addext "keyUsage=critical,digitalSignature,keyCertSign" \
-      -addext "extendedKeyUsage=serverAuth" >/dev/null 2>&1
-    chmod 600 "$CERT_DIR/localhost.key"
+    # Everything goes through a config file: no "-subj /CN=..." argument (Git Bash rewrites it as a
+    # Windows path) and no dependency on a system openssl.cnf (often missing on Windows).
+    local cnf="$LOG_DIR/openssl-localhost.cnf" log="$LOG_DIR/openssl.log"
+    cat > "$cnf" <<'CNF'
+[req]
+distinguished_name = dn
+x509_extensions = v3
+prompt = no
+[dn]
+CN = localhost
+O = Hermes Office Dev
+[v3]
+subjectAltName = DNS:localhost,IP:127.0.0.1
+basicConstraints = critical,CA:TRUE
+keyUsage = critical,digitalSignature,keyCertSign
+extendedKeyUsage = serverAuth
+CNF
+    if ! openssl req -x509 -newkey rsa:2048 -nodes -sha256 -days 825 \
+        -keyout "$CERT_DIR/localhost.key" -out "$CERT_DIR/localhost.crt" -config "$cnf" >"$log" 2>&1; then
+      cat "$log" >&2
+      die "openssl could not create the certificate (details above, also in $log)"
+    fi
+    chmod 600 "$CERT_DIR/localhost.key" 2>/dev/null || true
   fi
   if [ "$TRUST" = 1 ]; then
     case "$OS" in

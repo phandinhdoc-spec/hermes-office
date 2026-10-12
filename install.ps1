@@ -41,9 +41,29 @@ if (-not (Test-Path (Join-Path $Root 'addin\dist\index.html'))) {
 }
 
 # Hermes Agent: official installer runs under Git Bash (use WSL if you prefer the Linux build).
-$bash = Join-Path ${env:ProgramFiles} 'Git\bin\bash.exe'
-if (-not (Test-Path $bash)) { $bash = (Get-Command bash -ErrorAction SilentlyContinue).Source }
-if (-not $bash) { throw (T 'Khong tim thay Git Bash.' 'Git Bash not found.') }
+# Find Git Bash ourselves (Git may be installed but missing from PATH, or per-user): PATH, registry, default folders.
+function Find-GitBash {
+  $roots = @()
+  $g = Get-Command git -ErrorAction SilentlyContinue
+  if ($g) { $roots += (Split-Path -Parent (Split-Path -Parent $g.Source)) }   # ...\Git\cmd\git.exe -> ...\Git
+  foreach ($k in 'HKLM:\SOFTWARE\GitForWindows','HKCU:\SOFTWARE\GitForWindows','HKLM:\SOFTWARE\WOW6432Node\GitForWindows') {
+    $p = (Get-ItemProperty $k -ErrorAction SilentlyContinue).InstallPath
+    if ($p) { $roots += $p }
+  }
+  foreach ($pf in $env:ProgramFiles, ${env:ProgramFiles(x86)}, (Join-Path $env:LOCALAPPDATA 'Programs')) { if ($pf) { $roots += (Join-Path $pf 'Git') } }
+  foreach ($r in $roots) {
+    if (-not $r) { continue }
+    $b = Join-Path $r 'bin\bash.exe'
+    if (Test-Path $b) { return $b }
+  }
+  return $null   # not the WSL bash in System32: it cannot run install.sh with Windows paths
+}
+$bash = Find-GitBash
+if (-not $bash) { throw (T 'Khong tim thay Git Bash (bash.exe di kem Git for Windows). Hay cai lai Git roi chay lai install.bat.' 'Git Bash (bash.exe from Git for Windows) not found. Reinstall Git and run install.bat again.') }
+# Put Git's own tools (openssl, cygpath, ...) first on PATH so install.sh never depends on what else is installed.
+$gitRoot = Split-Path -Parent (Split-Path -Parent $bash)
+$env:Path = (Join-Path $gitRoot 'usr\bin') + ';' + (Join-Path $gitRoot 'bin') + ';' + $env:Path
+Say "Git Bash: $bash"
 $hasHermes = (Have 'hermes') -or (Test-Path "$HOME\.hermes\hermes-agent\.hermes\bin\hermes*") -or (Test-Path "$HOME\.local\bin\hermes*")
 if ($hasHermes) { Say "Hermes Agent: $(T 'da co' 'already installed')" }
 elseif (Ask 'Ban co muon tu dong tai & cai Hermes Agent khong?' 'Download and install Hermes Agent automatically?') {
@@ -64,8 +84,13 @@ if (-not (Have 'agy') -and -not (Test-Path "$HOME\.local\bin\agy*")) {
 # certs, build, background task: reuse install.sh
 Say (T 'Dang cai dich vu chay ngam...' 'Setting up the background service...')
 $unix = ($Root -replace '\\','/')
+$env:CHERE_INVOKING = '1'   # keep the working directory in the login shell
 & $bash -lc "cd '$unix' && ./install.sh install --yes --lang $Lang"
-if ($LASTEXITCODE -ne 0) { throw (T 'install.sh bao loi; xem thong bao phia tren.' 'install.sh reported an error; see messages above.') }
+if ($LASTEXITCODE -ne 0) {
+  $log = Join-Path $env:USERPROFILE '.hermes-office\openssl.log'
+  if (Test-Path $log) { Write-Host (T "--- Chi tiet loi openssl ($log) ---" "--- openssl error details ($log) ---") -ForegroundColor Yellow; Get-Content $log -Tail 20 }
+  throw (T 'install.sh bao loi; xem thong bao phia tren.' 'install.sh reported an error; see messages above.')
+}
 
 # Register the add-in manifest in a local shared catalog so Office lists it under Shared Folder.
 try {
