@@ -27,12 +27,22 @@ export const tools: Record<string, Handler> = {
   office_excel_set_formula: (a) => ok(excel.setFormula(String(a.address), String(a.formula))),
   office_excel_get_format: (a) => excel.getFormat(a.address),
   office_excel_set_format: (a) => ok(excel.setFormat(a.address, a)),
+  office_excel_create_table: (a) => excel.createTable(a.address, a.name, a.hasHeaders ?? true),
+  office_excel_list_tables: () => excel.listTables(),
+  office_excel_add_table_column: (a) => excel.addTableColumn(String(a.tableName), String(a.columnName), a.formula),
+  office_excel_insert_chart: (a) => excel.insertChart(String(a.dataAddress), a.chartType, a.title, a.targetCell),
+  office_excel_conditional_format: (a) => excel.applyConditionalFormat(a as any),
+  office_excel_sort_filter: (a) => excel.sortAndFilter(a),
+  office_excel_list_sheets: () => excel.listSheets(),
+  office_excel_add_sheet: (a) => excel.addSheet(a.name),
 
   office_ppt_get_slides: () => ppt.getSlides(),
   office_ppt_add_slide: async (a) => ({ slideId: await ppt.addSlide(a.layoutId, a.slideMasterId) }),
+  office_ppt_generate_slide: async (a) => ({ slideId: (await ppt.generateSlide(a as any)).slideId }),
   office_ppt_insert_text_box: (a) => ok(ppt.insertTextBox(String(a.text ?? ""), a)),
   office_ppt_get_theme: (a) => ppt.getTheme(a.slideIndex),
   office_ppt_format_shape: (a) => ok(ppt.formatShape(Number(a.slideIndex ?? 0), String(a.shapeId), a)),
+  office_ppt_apply_format: (a) => ppt.applyFormat(a),
 };
 
 export async function callTool(name: string, args: Args = {}): Promise<unknown> {

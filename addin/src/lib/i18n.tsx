@@ -134,6 +134,8 @@ const en = {
   "skillDetail.usageGeneric": "1. Tick this skill (or press “Activate”) — it is preloaded for every request.\n2. Ask Hermes in the chat as usual, e.g. “Use the {name} skill to …”.\n3. Untick it when you no longer need it.",
   "skillDetail.usageHeading": "Skill instructions",
   "skillDetail.copy": "Copy SKILL.md",
+  "skillDetail.prev": "Previous skill",
+  "skillDetail.next": "Next skill",
 
   "tools.office": "Office tools · {host}",
   "tools.hermes": "Hermes toolsets",
@@ -289,6 +291,8 @@ const vi: Record<Key, string> = {
   "skillDetail.usageGeneric": "1. Tích chọn kỹ năng này (hoặc bấm “Bật kỹ năng”) — kỹ năng được nạp sẵn cho mọi yêu cầu.\n2. Nhờ Hermes trong khung trò chuyện như bình thường, ví dụ “Dùng kỹ năng {name} để …”.\n3. Bỏ chọn khi không cần nữa.",
   "skillDetail.usageHeading": "Hướng dẫn của kỹ năng",
   "skillDetail.copy": "Sao chép SKILL.md",
+  "skillDetail.prev": "Kỹ năng trước",
+  "skillDetail.next": "Kỹ năng tiếp theo",
 
   "tools.office": "Công cụ Office · {host}",
   "tools.hermes": "Bộ công cụ Hermes",

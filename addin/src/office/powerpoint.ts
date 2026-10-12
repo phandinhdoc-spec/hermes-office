@@ -136,7 +136,114 @@ export interface ShapeFormat {
   fillColor?: string;
 }
 
-/** Masters/layouts of the deck plus font and fill of every shape on `slideIndex` (default: first selected slide). */
+export interface BatchFormatOptions extends ShapeFormat {
+  scope?: "selection" | "slide" | "presentation";
+  slideIndex?: number;
+}
+
+export async function applyFormat(opts: BatchFormatOptions): Promise<{ modified: number }> {
+  requireHost("powerpoint");
+  const scope = opts.scope ?? (opts.slideIndex !== undefined ? "slide" : "presentation");
+  return PowerPoint.run(async (ctx) => {
+    let slidesToFormat: PowerPoint.Slide[] = [];
+    if (scope === "selection") {
+      const sel = ctx.presentation.getSelectedSlides();
+      sel.load("items");
+      await ctx.sync();
+      slidesToFormat = sel.items.length > 0 ? sel.items : [ctx.presentation.slides.getItemAt(0)];
+    } else if (scope === "slide" && opts.slideIndex !== undefined) {
+      slidesToFormat = [ctx.presentation.slides.getItemAt(opts.slideIndex)];
+    } else {
+      const all = ctx.presentation.slides;
+      all.load("items");
+      await ctx.sync();
+      slidesToFormat = all.items;
+    }
+
+    if (slidesToFormat.length === 0) return { modified: 0 };
+
+    const shapeCollections = slidesToFormat.map((s) => {
+      s.shapes.load("items/id,items/type");
+      return s.shapes;
+    });
+    await ctx.sync();
+
+    let count = 0;
+    shapeCollections.forEach((shapes) => {
+      shapes.items.forEach((shape) => {
+        try {
+          if (shape.type !== "Image" && shape.type !== "Table") {
+            const tf = shape.textFrame;
+            if (tf) {
+              const font = tf.textRange.font;
+              if (opts.fontName !== undefined) font.name = opts.fontName;
+              if (opts.fontSize !== undefined) font.size = opts.fontSize;
+              if (opts.bold !== undefined) font.bold = opts.bold;
+              if (opts.italic !== undefined) font.italic = opts.italic;
+              if (opts.fontColor !== undefined) font.color = opts.fontColor;
+            }
+            if (opts.fillColor !== undefined && shape.fill) {
+              shape.fill.setSolidColor(opts.fillColor);
+            }
+            count++;
+          }
+        } catch {
+          /* skip non-textual shapes */
+        }
+      });
+    });
+
+    try {
+      await ctx.sync();
+    } catch {
+      /* some shapes without text frame might fail silently */
+    }
+    return { modified: count };
+  });
+}
+
+export interface GenerateSlideOptions {
+  title: string;
+  subtitle?: string;
+  bullets?: string[];
+  layoutId?: string;
+}
+
+export async function generateSlide(opts: GenerateSlideOptions): Promise<{ slideId: string }> {
+  requireHost("powerpoint");
+  return PowerPoint.run(async (ctx) => {
+    const slides = ctx.presentation.slides;
+    const addOpts: PowerPoint.AddSlideOptions = {};
+    if (opts.layoutId) addOpts.layoutId = opts.layoutId;
+    slides.add(addOpts);
+    await ctx.sync();
+    slides.load("items/id");
+    await ctx.sync();
+    const newSlide = slides.items[slides.items.length - 1];
+
+    // Add title box
+    if (opts.title) {
+      const tBox = newSlide.shapes.addTextBox(opts.title, { left: 50, top: 50, width: 620, height: 60 });
+      tBox.textFrame.textRange.font.size = 32;
+      tBox.textFrame.textRange.font.bold = true;
+    }
+
+    // Add subtitle or bullets
+    const bodyLines: string[] = [];
+    if (opts.subtitle) bodyLines.push(opts.subtitle);
+    if (opts.bullets && opts.bullets.length > 0) {
+      opts.bullets.forEach((b) => bodyLines.push(`• ${b}`));
+    }
+    if (bodyLines.length > 0) {
+      const bBox = newSlide.shapes.addTextBox(bodyLines.join("\n\n"), { left: 50, top: 130, width: 620, height: 320 });
+      bBox.textFrame.textRange.font.size = 18;
+    }
+
+    await ctx.sync();
+    return { slideId: newSlide.id };
+  });
+}
+
 export async function getTheme(slideIndex?: number): Promise<Record<string, unknown>> {
   requireHost("powerpoint");
   return PowerPoint.run(async (ctx) => {

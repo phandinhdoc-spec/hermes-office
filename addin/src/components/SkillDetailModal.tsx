@@ -1,7 +1,7 @@
 import { Fragment, useEffect, useState, type ReactNode } from "react";
 import type { SkillDetail } from "../lib/bridge";
 import { useI18n } from "../lib/i18n";
-import { IconButton, IconCopy, IconX } from "./ui";
+import { IconButton, IconChevron, IconChevronLeft, IconCopy, IconX } from "./ui";
 
 interface Props {
   name: string;
@@ -9,6 +9,10 @@ interface Props {
   active: boolean;
   onToggle: (on: boolean) => void;
   onClose: () => void;
+  onPrev?: () => void;
+  onNext?: () => void;
+  hasPrev?: boolean;
+  hasNext?: boolean;
 }
 
 type TabId = "purpose" | "explanation" | "usage" | "source";
@@ -54,7 +58,7 @@ function Markdown({ text }: { text: string }) {
   return <div className="space-y-1.5 text-[12px] leading-relaxed">{out}</div>;
 }
 
-export default function SkillDetailModal({ name, detail, active, onToggle, onClose }: Props) {
+export default function SkillDetailModal({ name, detail, active, onToggle, onClose, onPrev, onNext, hasPrev, hasNext }: Props) {
   const { t, lang } = useI18n();
   const [tab, setTab] = useState<TabId>("purpose");
 
@@ -128,6 +132,10 @@ export default function SkillDetailModal({ name, detail, active, onToggle, onClo
           {active ? "✓ " + t("skillDetail.active") : t("skillDetail.activate")}
         </button>
         {detail && <IconButton tip={t("skillDetail.copy")} onClick={() => void navigator.clipboard?.writeText(detail.content)}><IconCopy /></IconButton>}
+        <div className="flex items-center border-l border-gray-500/20 pl-1 ml-0.5 gap-0.5">
+          <IconButton tip={t("skillDetail.prev")} onClick={onPrev} disabled={!hasPrev}><IconChevronLeft /></IconButton>
+          <IconButton tip={t("skillDetail.next")} onClick={onNext} disabled={!hasNext}><IconChevron /></IconButton>
+        </div>
         <IconButton tip={t("common.closeEsc")} onClick={onClose}><IconX /></IconButton>
       </div>
       <div className="flex gap-0.5 border-b border-gray-500/20 px-2" role="tablist">

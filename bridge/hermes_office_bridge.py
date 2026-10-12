@@ -104,8 +104,18 @@ TOOLS: Dict[str, Dict[str, Any]] = {
     "office_word_apply_format": {"host": "word", "args": {"which": "selection|document (default selection)", "fontName": "string", "fontSize": "number", "bold": "bool", "italic": "bool", "color": "#RRGGBB", "alignment": "Left|Centered|Right|Justified", "lineSpacing": "points", "spaceBefore": "points", "spaceAfter": "points", "firstLineIndent": "points", "leftIndent": "points (all optional)"}},
     "office_excel_get_format": {"host": "excel", "args": {"address": "A1:C1 (optional, default selection)"}},
     "office_excel_set_format": {"host": "excel", "args": {"address": "A1:C1 (optional)", "fontName": "string", "fontSize": "number", "bold": "bool", "italic": "bool", "fontColor": "#RRGGBB", "fillColor": "#RRGGBB", "numberFormat": "e.g. #,##0.00", "horizontalAlignment": "Left|Center|Right", "verticalAlignment": "Top|Center|Bottom", "wrapText": "bool", "columnWidth": "number (all optional)"}},
+    "office_excel_create_table": {"host": "excel", "args": {"address": "string (optional, e.g. A1:E20)", "name": "string (optional)", "hasHeaders": "bool (optional, default true)"}},
+    "office_excel_list_tables": {"host": "excel", "args": {}},
+    "office_excel_add_table_column": {"host": "excel", "args": {"tableName": "string", "columnName": "string", "formula": "string (optional, e.g. =[@[Price]]*[@[Qty]])"}},
+    "office_excel_insert_chart": {"host": "excel", "args": {"dataAddress": "string (e.g. A1:D10)", "chartType": "ColumnClustered|Line|Pie|BarClustered (default ColumnClustered)", "title": "string (optional)", "targetCell": "string (optional, e.g. F2)"}},
+    "office_excel_conditional_format": {"host": "excel", "args": {"address": "string (optional)", "ruleType": "colorScale|preset|cellValue", "criteria": "string (optional, e.g. duplicateValues or number threshold)", "fillColor": "#RRGGBB (optional)", "fontColor": "#RRGGBB (optional)"}},
+    "office_excel_sort_filter": {"host": "excel", "args": {"address": "string (optional)", "sortColumn": "number (0-indexed)", "ascending": "bool (default true)", "filterColumn": "number (0-indexed, optional)", "filterCriteria": "string (optional)"}},
+    "office_excel_list_sheets": {"host": "excel", "args": {}},
+    "office_excel_add_sheet": {"host": "excel", "args": {"name": "string (optional)"}},
     "office_ppt_get_theme": {"host": "powerpoint", "args": {"slideIndex": "number (optional, default selected slide)"}},
     "office_ppt_format_shape": {"host": "powerpoint", "args": {"slideIndex": "number", "shapeId": "string", "fontName": "string", "fontSize": "number", "bold": "bool", "italic": "bool", "fontColor": "#RRGGBB", "fillColor": "#RRGGBB (optional)"}},
+    "office_ppt_apply_format": {"host": "powerpoint", "args": {"scope": "selection|slide|presentation (default presentation)", "slideIndex": "number (optional)", "fontName": "string", "fontSize": "number", "bold": "bool", "italic": "bool", "fontColor": "#RRGGBB", "fillColor": "#RRGGBB (all optional)"}},
+    "office_ppt_generate_slide": {"host": "powerpoint", "args": {"title": "string", "subtitle": "string (optional)", "bullets": "string[] (optional)", "layoutId": "string (optional)"}},
     "office_ppt_get_slides": {"host": "powerpoint", "args": {}},
     "office_ppt_add_slide": {"host": "powerpoint", "args": {"layoutId": "string (optional)"}},
     "office_ppt_insert_text_box": {
@@ -377,13 +387,19 @@ block with the language `office-tool` containing one JSON object: {{"tool": NAME
 Emit as many blocks as you need; they run in order and you will receive the results, then you
 continue. When you are done, reply with plain text and no tool blocks.
 
-Math, physics and chemistry in Word: write formulas as standard LaTeX, inline as $...$ or \\(...\\)
-and display as $$...$$ or \\[...\\]. Word converts them automatically into native Word Equation
+Math, physics and chemistry in Word: write formulas as standard LaTeX, inline as $...$ or \(...\)
+and display as $$...$$ or \[...\]. Word converts them automatically into native Word Equation
 objects (OMML), both in text you pass to office_word_* tools and in text inserted from the chat.
-Chemistry uses mhchem: $\\ce{{CaCO3 -> CaO + CO2 ^}}$, $\\ce{{H2SO4}}$, $\\ce{{Fe^3+}}$; units with $\\pu{{9.8 m/s^2}}$.
-Physics: $F = m a$, $E = \\frac{{1}}{{2}} m v^2$, $\\vec{{F}}$, $\\Delta t$. Do not write formulas as plain
+Chemistry uses mhchem: $\ce{{CaCO3 -> CaO + CO2 ^}}$, $\ce{{H2SO4}}$, $\ce{{Fe^3+}}$; units with $\pu{{9.8 m/s^2}}.
+Physics: $F = m a$, $E = \frac{{1}}{{2}} m v^2$, $\vec{{F}}$, $\Delta t$. Do not write formulas as plain
 text or unicode approximations, and do not put LaTeX in code fences. For one standalone formula
 you may call office_word_insert_equation.
+
+PowerPoint formatting & batch operations:
+To change fonts/colors in PowerPoint across shapes, use `office_ppt_apply_format` with scope='presentation'
+(all slides), scope='slide' (current or slideIndex), or scope='selection'. Do NOT call office_ppt_format_shape
+repeatedly in a loop. Note: Office.js does not support PowerPoint animations or slide transitions;
+if the user asks for animations/transitions, politely inform them that Office Add-in APIs do not support it.
 
 Available tools:
 {tools}

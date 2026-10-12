@@ -146,3 +146,175 @@ export async function setFormat(address: string | undefined, fmt: ExcelFormat): 
     await ctx.sync();
   });
 }
+
+// --- Excel Copilot-grade Advanced Capabilities ---
+
+export interface TableInfo {
+  id: string;
+  name: string;
+  columns: string[];
+  rowCount: number;
+}
+
+export async function createTable(address?: string, name?: string, hasHeaders = true): Promise<{ name: string; range: string }> {
+  requireHost("excel");
+  return Excel.run(async (ctx) => {
+    const sheet = ctx.workbook.worksheets.getActiveWorksheet();
+    const range = address ? sheet.getRange(address) : sheet.getUsedRange(true);
+    const table = sheet.tables.add(range, hasHeaders);
+    if (name) table.name = name;
+    const tRange = table.getRange();
+    table.load("name");
+    tRange.load("address");
+    await ctx.sync();
+    return { name: table.name, range: tRange.address };
+  });
+}
+
+export async function listTables(): Promise<TableInfo[]> {
+  requireHost("excel");
+  return Excel.run(async (ctx) => {
+    const tables = ctx.workbook.tables;
+    tables.load("items/id,items/name,items/columns/items/name,items/rows/count");
+    await ctx.sync();
+    return tables.items.map((t) => ({
+      id: t.id,
+      name: t.name,
+      columns: t.columns.items.map((c) => c.name),
+      rowCount: t.rows.count,
+    }));
+  });
+}
+
+export async function addTableColumn(tableName: string, columnName: string, formula?: string): Promise<{ success: boolean }> {
+  requireHost("excel");
+  return Excel.run(async (ctx) => {
+    const table = ctx.workbook.tables.getItem(tableName);
+    const col = table.columns.add(undefined, undefined, columnName);
+    if (formula) {
+      col.getDataBodyRange().formulas = [[formula]];
+    }
+    await ctx.sync();
+    return { success: true };
+  });
+}
+
+export async function insertChart(
+  dataAddress: string,
+  chartType: string = "ColumnClustered",
+  title?: string,
+  targetCell?: string,
+): Promise<{ chartName: string }> {
+  requireHost("excel");
+  return Excel.run(async (ctx) => {
+    const sheet = ctx.workbook.worksheets.getActiveWorksheet();
+    const dataRange = sheet.getRange(dataAddress);
+    const type = (Excel.ChartType as any)[chartType] ?? Excel.ChartType.columnClustered;
+    const chart = sheet.charts.add(type, dataRange, Excel.ChartSeriesBy.auto);
+    if (title) {
+      chart.title.text = title;
+    }
+    if (targetCell) {
+      const cell = sheet.getRange(targetCell);
+      chart.setPosition(cell, cell);
+    }
+    chart.load("name");
+    await ctx.sync();
+    return { chartName: chart.name };
+  });
+}
+
+export interface ConditionalFormatArgs {
+  address?: string;
+  ruleType: "colorScale" | "preset" | "cellValue";
+  criteria?: string;
+  fillColor?: string;
+  fontColor?: string;
+}
+
+export async function applyConditionalFormat(args: ConditionalFormatArgs): Promise<{ success: boolean }> {
+  requireHost("excel");
+  return Excel.run(async (ctx) => {
+    const sheet = ctx.workbook.worksheets.getActiveWorksheet();
+    const range = args.address ? sheet.getRange(args.address) : ctx.workbook.getSelectedRange();
+    if (args.ruleType === "colorScale") {
+      range.conditionalFormats.add(Excel.ConditionalFormatType.colorScale);
+    } else if (args.ruleType === "preset") {
+      const cf = range.conditionalFormats.add(Excel.ConditionalFormatType.presetCriteria);
+      const presetRule = cf.preset;
+      (presetRule as any).rule = {
+        criterion: args.criteria === "duplicateValues"
+          ? Excel.ConditionalFormatPresetCriterion.duplicateValues
+          : Excel.ConditionalFormatPresetCriterion.uniqueValues,
+      };
+      if (args.fillColor) presetRule.format.fill.color = args.fillColor;
+      if (args.fontColor) presetRule.format.font.color = args.fontColor;
+    } else if (args.ruleType === "cellValue" && args.criteria) {
+      const cf = range.conditionalFormats.add(Excel.ConditionalFormatType.cellValue);
+      const cvRule = cf.cellValue;
+      (cvRule as any).rule = {
+        operator: Excel.ConditionalCellValueOperator.greaterThan,
+        formula1: args.criteria,
+      };
+      if (args.fillColor) cvRule.format.fill.color = args.fillColor;
+      if (args.fontColor) cvRule.format.font.color = args.fontColor;
+    }
+    await ctx.sync();
+    return { success: true };
+  });
+}
+
+export interface SortFilterArgs {
+  address?: string;
+  sortColumn?: number;
+  ascending?: boolean;
+  filterColumn?: number;
+  filterCriteria?: string;
+}
+
+export async function sortAndFilter(args: SortFilterArgs): Promise<{ success: boolean }> {
+  requireHost("excel");
+  return Excel.run(async (ctx) => {
+    const sheet = ctx.workbook.worksheets.getActiveWorksheet();
+    const range = args.address ? sheet.getRange(args.address) : ctx.workbook.getSelectedRange();
+    if (args.sortColumn !== undefined) {
+      range.sort.apply([
+        {
+          key: args.sortColumn,
+          ascending: args.ascending ?? true,
+        },
+      ]);
+    }
+    if (args.filterColumn !== undefined && args.filterCriteria !== undefined) {
+      sheet.autoFilter.apply(range, args.filterColumn, { filterOn: Excel.FilterOn.values, values: [args.filterCriteria] });
+    }
+    await ctx.sync();
+    return { success: true };
+  });
+}
+
+export async function listSheets(): Promise<{ sheets: { name: string; position: number; visibility: string }[] }> {
+  requireHost("excel");
+  return Excel.run(async (ctx) => {
+    const sheets = ctx.workbook.worksheets;
+    sheets.load("items/name,items/position,items/visibility");
+    await ctx.sync();
+    return {
+      sheets: sheets.items.map((s) => ({
+        name: s.name,
+        position: s.position,
+        visibility: s.visibility,
+      })),
+    };
+  });
+}
+
+export async function addSheet(name?: string): Promise<{ name: string }> {
+  requireHost("excel");
+  return Excel.run(async (ctx) => {
+    const sheet = ctx.workbook.worksheets.add(name);
+    sheet.load("name");
+    await ctx.sync();
+    return { name: sheet.name };
+  });
+}

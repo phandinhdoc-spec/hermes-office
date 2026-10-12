@@ -14,8 +14,8 @@ hermes-office chat prompt by the bridge.
 | App | Inspect | Apply |
 |---|---|---|
 | Word | `office_word_get_styles` (`which`: selection/document) | `office_word_apply_format` (fontName, fontSize, bold, italic, color, alignment, lineSpacing, spaceBefore, spaceAfter, firstLineIndent, leftIndent) |
-| Excel | `office_excel_get_format` (address) | `office_excel_set_format` (fontName, fontSize, bold, italic, fontColor, fillColor, numberFormat, horizontalAlignment, wrapText, columnWidth) |
-| PowerPoint | `office_ppt_get_theme` (slideIndex) | `office_ppt_format_shape` (slideIndex, shapeId, fontName, fontSize, bold, italic, fontColor, fillColor) |
+| Excel | `office_excel_get_format` (address), `office_excel_list_tables`, `office_excel_list_sheets` | `office_excel_set_format`, `office_excel_create_table`, `office_excel_add_table_column`, `office_excel_insert_chart`, `office_excel_conditional_format`, `office_excel_sort_filter`, `office_excel_add_sheet` |
+| PowerPoint | `office_ppt_get_theme` (slideIndex) | `office_ppt_apply_format` (scope: selection/slide/presentation, fontName, fontSize, bold, italic, fontColor, fillColor), `office_ppt_format_shape` (slideIndex, shapeId), `office_ppt_generate_slide` (title, subtitle, bullets) |
 | Profile | `office_style_get_profile` | `office_style_save_profile` (partial object, deep-merged, `null` deletes a key) |
 
 HTTP: `GET /style-profile`, `PUT /style-profile` (merge; `?replace=true` to overwrite).

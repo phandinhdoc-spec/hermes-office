@@ -20,6 +20,7 @@ export const IconEdit = svg(<><path d="M10.5 2.5 13.5 5.5 5.5 13.5H2.5v-3l8-8Z" 
 export const IconTools = svg(<path d="M9.5 3.2a3 3 0 0 0 3.3 3.9L7 12.9a1.6 1.6 0 0 1-2.3-2.3L10.5 4.8M9.5 3.2l1.7 1.7" />);
 export const IconTrash = svg(<path d="M3 4.5h10M6.5 4.5V3h3v1.5M4.5 4.5l.5 8h6l.5-8" />);
 export const IconChevron = svg(<path d="m6 4 4 4-4 4" />);
+export const IconChevronLeft = svg(<path d="m10 4-4 4 4 4" />);
 export const IconCheck = svg(<path d="m3.5 8.5 3 3 6-7" />);
 export const IconX = svg(<path d="m4 4 8 8M12 4l-8 8" />);
 export const IconInsert = svg(<path d="M8 2.5v8M4.5 7 8 10.5 11.5 7M3 13.5h10" />);

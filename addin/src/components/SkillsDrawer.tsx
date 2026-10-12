@@ -79,15 +79,26 @@ export default function SkillsDrawer({ open, skills, active, onChange, onRefresh
         })}
         {!shown.length && <p className="p-3 text-center text-[12px] text-gray-500">{skills.length ? t("skillsDrawer.noMatch") : t("skillsDrawer.empty")}</p>}
       </div>
-      {detailName && (
-        <SkillDetailModal
-          name={detailName}
-          detail={details[detailName]}
-          active={active.includes(detailName)}
-          onToggle={(on) => toggle(detailName, on)}
-          onClose={() => setDetailName(null)}
-        />
-      )}
+      {detailName && (() => {
+        const currentIndex = shown.findIndex((s) => s.name === detailName);
+        const hasPrev = currentIndex > 0;
+        const hasNext = currentIndex >= 0 && currentIndex < shown.length - 1;
+        const handlePrev = hasPrev ? () => openDetail(shown[currentIndex - 1].name) : undefined;
+        const handleNext = hasNext ? () => openDetail(shown[currentIndex + 1].name) : undefined;
+        return (
+          <SkillDetailModal
+            name={detailName}
+            detail={details[detailName]}
+            active={active.includes(detailName)}
+            onToggle={(on) => toggle(detailName, on)}
+            onClose={() => setDetailName(null)}
+            onPrev={handlePrev}
+            onNext={handleNext}
+            hasPrev={hasPrev}
+            hasNext={hasNext}
+          />
+        );
+      })()}
     </div>
   );
 }
