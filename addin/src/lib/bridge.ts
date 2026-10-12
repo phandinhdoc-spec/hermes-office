@@ -6,7 +6,20 @@ export interface HermesStatus {
   version: string | null;
 }
 
+export interface AuthInfo {
+  hermes: HermesStatus;
+  agy: { installed: boolean; path: string | null };
+  logged_in: boolean;
+  account: string | null;
+  provider: string;
+  models: { core: string | null; fast: string | null };
+  login_running: boolean;
+  install_running: boolean;
+}
+
 export type BridgeEvent =
+  | ({ type: "auth_status" } & AuthInfo)
+  | { type: "auth_progress"; stage: string; line: string; url?: string; ok?: boolean; manual?: boolean; cancelled?: boolean; timeout?: boolean; error?: string }
   | { type: "status"; hermes: HermesStatus; tools: string[] }
   | { type: "delta"; id: string; text: string }
   | { type: "tool_call"; id: string; tool: string; args: unknown }

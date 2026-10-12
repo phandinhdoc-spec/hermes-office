@@ -8,7 +8,7 @@ export function isInlineShortcut(e: KeyboardEvent): boolean {
   return !e.ctrlKey && !e.metaKey && !e.altKey && !e.shiftKey;
 }
 
-/** True while an IME (Telex/VNI/Unikey) is composing. Safari/WKWebView fire compositionend before the Enter keydown, so isComposing alone is not enough: keyCode 229 covers it. */
+/** True while an IME (Telex/VNI) is composing. WKWebView fires compositionend before the Enter keydown, so isComposing alone is not enough: keyCode 229 covers it. */
 export function isImeKey(e: { nativeEvent?: KeyboardEvent; keyCode?: number; isComposing?: boolean }): boolean {
   const n = e.nativeEvent ?? (e as unknown as KeyboardEvent);
   return !!(n.isComposing || e.isComposing || n.keyCode === 229 || e.keyCode === 229);

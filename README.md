@@ -31,8 +31,10 @@ Extension / Add-in cho Microsoft Office (**Word**, **Excel**, **PowerPoint**) k�
 
 ## 🚀 Cài đặt nhanh (Quick Start)
 
+> 👉 **Người dùng không rành máy tính:** xem [`HDSD_CAI_DAT.md`](HDSD_CAI_DAT.md) — chỉ cần nhấp đúp `install.bat` (Windows) hoặc `install.command` (macOS), hoặc chạy `./install.sh` (Linux). Script tự hỏi, tự tải Hermes Agent / Antigravity, rồi bạn **đăng nhập Gmail ngay trong tiện ích**.
+
 ### Yêu cầu tiên quyết
-- Đã cài đặt **Hermes CLI** trên máy (`hermes`).
+- **Hermes CLI** (`hermes`): script cài đặt sẽ hỏi và tự tải nếu chưa có; **Antigravity (`agy`)** là tùy chọn.
 - **Node.js** (>= 18) và **Python 3** (>= 3.9).
 - Microsoft Office (Word, Excel, PowerPoint) trên macOS hoặc Windows.
 
@@ -50,7 +52,12 @@ cd hermes-office
 - Sideload `manifest.xml` vào thư mục Developer Add-ins của Word, Excel, PowerPoint.
 - Đăng ký và kích hoạt dịch vụ chạy ngầm tự động (`com.hermes.office`).
 
-### 2. Kích hoạt trong Office
+**Windows:** nhấp đúp `install.bat` · **macOS:** nhấp đúp `install.command` · tham số: `--yes` (không hỏi), `--lang vi|en`.
+
+### 2. Đăng nhập Google trong tiện ích
+Lần đầu mở Task Pane sẽ hiện hộp thoại **Đăng nhập Google / Gmail** (và nút **Cài Hermes Agent tự động** nếu thiếu). Bridge cung cấp `GET /auth/status`, `POST /auth/google` và các tin nhắn WebSocket `auth_status`, `auth_google`, `auth_cancel`, `auth_logout`, `setup_install` (tiến trình trả về qua `auth_progress`). Email đang đăng nhập hiện ở header. Biến môi trường: `HERMES_AUTH_PROVIDER` (mặc định `antigravity`), `HERMES_INSTALL_URL`, `AGY_INSTALL_URL`.
+
+### 3. Kích hoạt trong Office
 1. Khởi động (hoặc mở lại) **Microsoft Word**, **Excel** hoặc **PowerPoint**.
 2. Vào thẻ **Insert (Chèn)** → chọn **Add-ins (Tiện ích bổ sung)** → chọn **My Add-ins (Tiện ích bổ sung của tôi)**.
 3. Chọn tab **Developer Add-ins (Nhà phát triển)** → Nhấp vào **`Hermes for Office`**.
@@ -104,7 +111,7 @@ cd hermes-office
 ```
 hermes-office/
 ├── manifest.xml          # Khai báo Office Web Add-in cho Word, Excel, PowerPoint
-├── install.sh            # Script tự động cài đặt, sinh SSL, sideload và cấu hình daemon
+├── install.sh / install.command / install.bat / install.ps1   # Script tự động cài đặt, sinh SSL, sideload và cấu hình daemon
 ├── bridge/                # Backend daemon FastAPI + WebSocket bridge
 │   └── hermes_office_bridge.py
 ├── addin/                 # Frontend Task Pane (React + TypeScript + Tailwind CSS)
