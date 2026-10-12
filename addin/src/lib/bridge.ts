@@ -15,11 +15,14 @@ export interface AuthInfo {
   models: { core: string | null; fast: string | null };
   login_running: boolean;
   install_running: boolean;
+  /** Antigravity plugin of Hermes, enabled automatically once agy is installed. */
+  plugin?: { name: string | null; enabled: boolean };
 }
 
 export type BridgeEvent =
   | ({ type: "auth_status" } & AuthInfo)
   | { type: "auth_progress"; stage: string; line: string; url?: string; ok?: boolean; manual?: boolean; cancelled?: boolean; timeout?: boolean; error?: string }
+  | { type: "plugin_progress"; stage: string; line: string; plugin?: string; ok?: boolean; needs?: "hermes" | "agy"; timeout?: boolean; error?: string }
   | { type: "compose"; target: "chat" | "inline"; text: string }
   | { type: "status"; hermes: HermesStatus; tools: string[] }
   | { type: "delta"; id: string; text: string }

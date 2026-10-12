@@ -57,6 +57,13 @@ cd hermes-office
 ### 2. Đăng nhập Google trong tiện ích
 Lần đầu mở Task Pane sẽ hiện hộp thoại **Đăng nhập Google / Gmail** (và nút **Cài Hermes Agent tự động** nếu thiếu). Bridge cung cấp `GET /auth/status`, `POST /auth/google` và các tin nhắn WebSocket `auth_status`, `auth_google`, `auth_cancel`, `auth_logout`, `setup_install` (tiến trình trả về qua `auth_progress`). Email đang đăng nhập hiện ở header. Biến môi trường: `HERMES_AUTH_PROVIDER` (mặc định `antigravity`), `HERMES_INSTALL_URL`, `AGY_INSTALL_URL`.
 
+#### Plugin Antigravity cho Hermes (tự cài và bật)
+Plugin `antigravity-subscription-directsdk` cho Hermes dùng Gemini qua tài khoản Antigravity (`agy`) đã đăng nhập. Thứ tự: cài `agy` và đăng nhập trước, sau đó bật plugin bằng `hermes plugins enable antigravity-subscription-directsdk`. Hermes Office làm bước bật này tự động ở hai chỗ:
+- **`install.sh`** (cũng chạy qua `install.bat` trên Windows): hỏi rồi bật plugin nếu đã có `hermes` và `agy`. Chạy riêng bằng `./install.sh plugin`.
+- **Bridge**: ngay sau khi đăng nhập Google thành công trong tiện ích, nếu có `agy` thì tự bật plugin. Cũng có thể gửi `{"type":"setup_install","target":"plugin"}`; tiến trình trả về qua `plugin_progress`, trạng thái nằm ở `auth_status.plugin`.
+
+Sau khi plugin được bật, các thao tác sửa nhanh (inline, `F6`) chạy với `--provider antigravity-subscription-directsdk` và model `gemini-3.8-flash`. Đặt `HERMES_FAST_PROVIDER` để dùng provider khác, hoặc `HERMES_AGY_PLUGIN=""` để tắt hẳn tính năng này.
+
 ### 3. Kích hoạt trong Office
 1. Khởi động (hoặc mở lại) **Microsoft Word**, **Excel** hoặc **PowerPoint**.
 2. Vào thẻ **Insert (Chèn)** → chọn **Add-ins (Tiện ích bổ sung)** → chọn **My Add-ins (Tiện ích bổ sung của tôi)**.

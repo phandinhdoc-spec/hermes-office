@@ -19,6 +19,7 @@ Trong quá trình cài, chương trình sẽ **hỏi bạn** những câu đơn 
    - *Bạn có muốn tự động cài Git / Python / Node.js không?* → **Y** (nếu máy chưa có).
    - *Bạn có muốn tự động tải & cài Hermes Agent không?* → **Y**.
    - *Bạn có muốn cài Antigravity (agy) không? (tùy chọn)* → **Y** sẽ mở trang tải Antigravity.
+   - *Bạn có muốn bật plugin Antigravity trong Hermes không?* → **Y** nếu đã cài `agy` **và đã đăng nhập vào agy**. Nếu chưa, bỏ qua; sau khi đăng nhập Google trong tiện ích, plugin sẽ được bật tự động (hoặc chạy `./install.sh plugin` trong Git Bash).
 5. Khi thấy dòng **"Xong!"**, đóng cửa sổ. Nếu Windows hỏi "Có tin cậy chứng chỉ localhost?" → bấm **Yes**.
 
 > Nếu Office không tự hiện tiện ích: **Insert → Add-ins → Shared Folder → Hermes for Office**. Nếu mục này trống, xem phần *Thêm thủ công* ở cuối.

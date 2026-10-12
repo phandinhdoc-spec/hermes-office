@@ -16,7 +16,7 @@ client -> bridge
   {"type": "rpc_result", "id": str, "result": any} | {"type": "rpc_result", "id": str, "error": str}
   {"type": "auth_status"}                      (hermes/agy installed + Google account logged in?)
   {"type": "auth_google"} | {"type": "auth_cancel"} | {"type": "auth_logout"}   (Google OAuth via Antigravity)
-  {"type": "setup_install", "target": "hermes|agy"}                            (stream installer progress)
+  {"type": "setup_install", "target": "hermes|agy|plugin"}                     (stream installer progress; "plugin" = hermes plugins enable <HERMES_AGY_PLUGIN>)
 
 bridge -> client
   {"type": "status", "hermes": {...}, "tools": [...]}
@@ -30,6 +30,7 @@ bridge -> client
   {"type": "rpc_request", "id": str, "tool": str, "args": {...}}    (client must answer with rpc_result)
   {"type": "auth_status", **auth_info}                              (broadcast to every session when it changes)
   {"type": "auth_progress", "stage": str, "line": str?, "url": str?}   (login / setup progress)
+  {"type": "plugin_progress", "stage": "plugin", "line": str, "ok": bool?, "needs": "hermes|agy"?}   (plugin enable progress)
 
 The agent triggers Office edits by emitting fenced blocks in its reply:
 
@@ -80,6 +81,10 @@ HERMES_INSTALL_URL = os.environ.get(
 )
 AGY_INSTALL_URL = os.environ.get("AGY_INSTALL_URL", "")
 AUTH_PROVIDER = os.environ.get("HERMES_AUTH_PROVIDER", "antigravity")  # Google sign-in provider id in Hermes
+# Hermes plugin that serves Gemini through the signed-in Antigravity (agy) account. Enabled automatically with
+# `hermes plugins enable <name>` once agy is installed; HERMES_AGY_PLUGIN="" turns the whole feature off.
+PLUGIN_NAME = os.environ.get("HERMES_AGY_PLUGIN", "antigravity-subscription-directsdk")
+PLUGIN_MARKER = Path.home() / ".hermes-office" / "plugin-enabled"  # records that Hermes Office enabled PLUGIN_NAME
 CERT_DIR = Path.home() / ".hermes-office" / "certs"
 DIST_DIR = Path(os.environ.get("HERMES_OFFICE_DIST") or Path(__file__).resolve().parent.parent / "addin" / "dist")
 
@@ -171,6 +176,22 @@ def find_agy() -> Optional[str]:
     return None
 
 
+PLUGIN_NAME_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,120}$")  # no leading "-": cannot become a CLI flag
+
+
+def plugin_enabled() -> bool:
+    """True once Hermes Office has run `hermes plugins enable PLUGIN_NAME` successfully."""
+    try:
+        return bool(PLUGIN_NAME) and PLUGIN_MARKER.read_text(encoding="utf-8").strip() == PLUGIN_NAME
+    except OSError:
+        return False
+
+
+def fast_provider() -> Optional[str]:
+    """Provider for fast (inline) edits: HERMES_FAST_PROVIDER wins; else the Antigravity plugin once it is enabled."""
+    return FAST_PROVIDER or (PLUGIN_NAME if plugin_enabled() else None)
+
+
 # --------------------------------------------------------------------------- google auth / setup
 
 URL_RE = re.compile(r"https?://[^\s\"'<>]+")
@@ -207,6 +228,7 @@ async def auth_info() -> Dict[str, Any]:
         "models": {"core": CORE_MODEL, "fast": FAST_MODEL},
         "login_running": login_task is not None and not login_task.done(),
         "install_running": install_task is not None and not install_task.done(),
+        "plugin": {"name": PLUGIN_NAME or None, "enabled": plugin_enabled()},
     }
 
 
@@ -218,8 +240,11 @@ async def broadcast(msg: Dict[str, Any]) -> None:
             pass
 
 
-async def stream_process(cmd: List[str], stage: str, env: Optional[Dict[str, str]] = None, shell_script: Optional[bytes] = None) -> int:
-    """Run `cmd`, broadcasting each output line as auth_progress (and any URL found in it)."""
+async def stream_process(
+    cmd: List[str], stage: str, env: Optional[Dict[str, str]] = None, shell_script: Optional[bytes] = None,
+    event: str = "auth_progress",
+) -> int:
+    """Run `cmd`, broadcasting each output line as `event` (auth_progress by default) and any URL found in it."""
     proc = await asyncio.create_subprocess_exec(
         *cmd, stdin=asyncio.subprocess.PIPE if shell_script is not None else asyncio.subprocess.DEVNULL,
         stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.STDOUT, env={**os.environ, "NO_COLOR": "1", **(env or {})},
@@ -234,7 +259,7 @@ async def stream_process(cmd: List[str], stage: str, env: Optional[Dict[str, str
             line = ANSI_RE.sub("", raw.decode(errors="replace")).strip()
             if not line:
                 continue
-            frame: Dict[str, Any] = {"type": "auth_progress", "stage": stage, "line": line[:400]}
+            frame: Dict[str, Any] = {"type": event, "stage": stage, "line": line[:400]}
             m = URL_RE.search(line)
             if m and URL_ALLOWED.match(m.group(0)):
                 frame["url"] = m.group(0)
@@ -257,6 +282,8 @@ async def _login() -> None:
             stream_process([find_hermes() or "hermes", "auth", "add", AUTH_PROVIDER, "--type", "oauth"], "login"), timeout=300
         )
         await broadcast({"type": "auth_progress", "stage": "login", "line": "exit", "ok": rc == 0})
+        if rc == 0 and PLUGIN_NAME and find_agy() and not plugin_enabled():
+            await _enable_plugin()  # signed in and agy present: switch the Antigravity plugin on without asking again
     except asyncio.TimeoutError:
         await broadcast({"type": "auth_progress", "stage": "login", "line": "exit", "ok": False, "timeout": True})
     except asyncio.CancelledError:
@@ -292,6 +319,43 @@ async def _install(target: str) -> None:
     except Exception as exc:  # noqa: BLE001
         log.exception("install failed")
         await broadcast({"type": "auth_progress", "stage": target, "line": "exit", "ok": False, "error": str(exc)})
+    finally:
+        await broadcast({"type": "auth_status", **await auth_info()})
+
+
+async def _enable_plugin() -> None:
+    """`hermes plugins enable <PLUGIN_NAME>`; progress goes out as plugin_progress (never mixes with the login dialog).
+
+    Order follows the plugin's own setup: agy CLI installed (and signed in) first, then enable. Safe to repeat.
+    """
+    event = "plugin_progress"
+
+    async def done(ok: bool, **extra: Any) -> None:
+        await broadcast({"type": event, "stage": "plugin", "line": "exit", "ok": ok, "plugin": PLUGIN_NAME, **extra})
+
+    try:
+        if not PLUGIN_NAME or not PLUGIN_NAME_RE.match(PLUGIN_NAME):
+            await done(False, error="plugin name is empty or invalid")
+        elif not find_hermes():
+            await done(False, needs="hermes")
+        elif not find_agy():
+            await done(False, needs="agy")  # step 1 of the plugin setup: install the agy CLI (and sign in)
+        else:
+            await broadcast({"type": event, "stage": "plugin", "line": "start", "plugin": PLUGIN_NAME})
+            rc = await asyncio.wait_for(
+                stream_process([find_hermes() or "hermes", "plugins", "enable", PLUGIN_NAME], "plugin", event=event), timeout=120
+            )
+            if rc == 0:
+                PLUGIN_MARKER.parent.mkdir(parents=True, exist_ok=True)
+                PLUGIN_MARKER.write_text(PLUGIN_NAME, encoding="utf-8")
+            await done(rc == 0)
+    except asyncio.TimeoutError:
+        await done(False, timeout=True)
+    except asyncio.CancelledError:
+        raise
+    except Exception as exc:  # noqa: BLE001
+        log.exception("plugin enable failed")
+        await done(False, error=str(exc))
     finally:
         await broadcast({"type": "auth_status", **await auth_info()})
 
@@ -446,7 +510,7 @@ def list_models() -> Dict[str, Any]:
             models.append(entry)
 
     add(CORE_MODEL, CORE_PROVIDER, f"{CORE_MODEL} (core)", "core")
-    add(FAST_MODEL, FAST_PROVIDER, f"{FAST_MODEL} (fast)", "fast")
+    add(FAST_MODEL, fast_provider(), f"{FAST_MODEL} (fast)", "fast")
     add(configured["model"], configured["provider"], f"{configured['model']} (configured)")
     for cp in cfg.get("custom_providers") or []:
         name = cp.get("name") or "custom"
@@ -776,7 +840,7 @@ def route_model(sess: "Session", fast: bool = False) -> Dict[str, Optional[str]]
     if sess.model:
         return {"model": sess.model, "provider": sess.provider}
     if fast and FAST_MODEL:
-        return {"model": FAST_MODEL, "provider": FAST_PROVIDER}
+        return {"model": FAST_MODEL, "provider": fast_provider()}
     return {"model": CORE_MODEL, "provider": CORE_PROVIDER}
 
 
@@ -1122,6 +1186,8 @@ async def ws_endpoint(ws: WebSocket) -> None:
                 target = msg.get("target")
                 if target in ("hermes", "agy") and not (install_task and not install_task.done()):
                     install_task = asyncio.create_task(_install(target))
+                elif target == "plugin" and not (install_task and not install_task.done()):
+                    install_task = asyncio.create_task(_enable_plugin())
             elif kind == "open_compose":
                 tgt = "inline" if msg.get("target") == "inline" else "chat"
                 lang = "en" if msg.get("lang") == "en" else "vi"

@@ -6,6 +6,7 @@
 #   ./install.sh sideload    copy manifest.xml into the Word/Excel/PowerPoint wef folders (macOS)
 #   ./install.sh uninstall   remove the service and the sideloaded manifests (keeps certs)
 #   ./install.sh status      show what is installed
+#   ./install.sh plugin      enable the Hermes plugin antigravity-subscription-directsdk (agy installed + signed in first)
 #   ./install.sh start       run bridge + Vite dev server together (development)
 #
 #   ./install.sh service-install     install + start the autostart daemon
@@ -41,6 +42,10 @@ LANG_UI=""
 HERMES_INSTALL_URL="${HERMES_INSTALL_URL:-https://raw.githubusercontent.com/NousResearch/hermes-agent/main/scripts/install.sh}"
 AGY_INSTALL_URL="${AGY_INSTALL_URL:-}"   # no public one-line installer known: we point to the download page
 AGY_DOWNLOAD_PAGE="https://antigravity.google/download"
+# Hermes plugin that serves Gemini through the signed-in agy account (empty = skip the plugin step).
+HERMES_AGY_PLUGIN="${HERMES_AGY_PLUGIN-antigravity-subscription-directsdk}"
+PLUGIN_MARKER="$HOME/.hermes-office/plugin-enabled"   # read by the bridge: plugin already enabled by Hermes Office
+case "$HERMES_AGY_PLUGIN" in -*) echo "invalid HERMES_AGY_PLUGIN: $HERMES_AGY_PLUGIN" >&2; exit 1 ;; esac
 prev=""
 for a in "$@"; do
   [ "$a" = "--no-trust" ] && TRUST=0
@@ -124,6 +129,40 @@ setup_agents() {
     else
       warn "$(tr_ "Hay tai Antigravity tai: $AGY_DOWNLOAD_PAGE (khong bat buoc de dung tien ich)." "Please download Antigravity from: $AGY_DOWNLOAD_PAGE (not required to use the add-in).")"
       case "$OS" in mac) command -v open >/dev/null && open "$AGY_DOWNLOAD_PAGE" || true ;; linux) command -v xdg-open >/dev/null && xdg-open "$AGY_DOWNLOAD_PAGE" >/dev/null 2>&1 || true ;; esac
+    fi
+  fi
+  enable_plugin
+}
+
+hermes_bin() {
+  local c
+  for c in "$(command -v hermes 2>/dev/null || true)" "$HOME/.hermes/hermes-agent/.hermes/bin/hermes" "$HOME/.local/bin/hermes"; do
+    if [ -n "$c" ] && [ -x "$c" ]; then echo "$c"; return 0; fi
+  done
+  return 1
+}
+
+# Antigravity plugin for Hermes: needs the agy CLI installed and signed in first, then
+#   hermes plugins enable antigravity-subscription-directsdk
+# Afterwards the bridge routes fast (inline) edits through that provider with gemini-3.8-flash.
+enable_plugin() {
+  [ -n "$HERMES_AGY_PLUGIN" ] || return 0
+  local h; h="$(hermes_bin)" || return 0
+  if ! agy_present; then
+    warn "$(tr_ "Chua co Antigravity (agy) nen chua bat plugin $HERMES_AGY_PLUGIN. Hay cai agy, dang nhap vao agy, roi chay: ./install.sh plugin" "agy is not installed, so plugin $HERMES_AGY_PLUGIN is not enabled yet. Install agy, sign in to it, then run: ./install.sh plugin")"
+    return 0
+  fi
+  if [ "$(cat "$PLUGIN_MARKER" 2>/dev/null || true)" = "$HERMES_AGY_PLUGIN" ]; then
+    say "$(tr_ "Plugin $HERMES_AGY_PLUGIN: da bat" "Plugin $HERMES_AGY_PLUGIN: already enabled")"
+    return 0
+  fi
+  if ask "Ban co muon bat plugin Antigravity ($HERMES_AGY_PLUGIN) trong Hermes khong? (can agy da dang nhap)" "Enable the Antigravity plugin ($HERMES_AGY_PLUGIN) in Hermes? (agy must be signed in)"; then
+    if "$h" plugins enable "$HERMES_AGY_PLUGIN"; then
+      mkdir -p "$(dirname "$PLUGIN_MARKER")"
+      printf '%s' "$HERMES_AGY_PLUGIN" > "$PLUGIN_MARKER"
+      say "$(tr_ "Da bat plugin $HERMES_AGY_PLUGIN." "Enabled plugin $HERMES_AGY_PLUGIN.")"
+    else
+      warn "$(tr_ "Bat plugin that bai. Hay dang nhap agy roi chay lai: ./install.sh plugin" "Could not enable the plugin. Sign in to agy, then run: ./install.sh plugin")"
     fi
   fi
 }
@@ -358,6 +397,9 @@ do_status() {
   service_status
   if hermes_present; then echo "hermes: installed"; else echo "hermes: NOT found"; fi
   if agy_present; then echo "agy: installed"; else echo "agy: NOT found (optional)"; fi
+  if [ -n "$HERMES_AGY_PLUGIN" ]; then
+    if [ "$(cat "$PLUGIN_MARKER" 2>/dev/null || true)" = "$HERMES_AGY_PLUGIN" ]; then echo "plugin $HERMES_AGY_PLUGIN: enabled"; else echo "plugin $HERMES_AGY_PLUGIN: not enabled (needs agy signed in; run ./install.sh plugin)"; fi
+  fi
 }
 
 final_message() {
@@ -378,6 +420,7 @@ case "$CMD" in
   sideload)  do_sideload ;;
   uninstall) service_uninstall; do_uninstall ;;
   status)    do_status ;;
+  plugin)    enable_plugin ;;
   start)     do_start ;;
   service-install)   service_install ;;
   service-uninstall) service_uninstall ;;
