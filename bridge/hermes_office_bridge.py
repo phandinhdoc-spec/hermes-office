@@ -192,14 +192,28 @@ def error_frame(cid: Optional[str], exc: BaseException) -> Dict[str, Any]:
     return frame
 
 
+IS_WIN = os.name == "nt"
+WIN_EXEC_EXT = (".exe", ".cmd", ".bat", ".com")
+
+
 def find_hermes() -> Optional[str]:
+    names = ["hermes"] + ([f"hermes{e}" for e in WIN_EXEC_EXT] if IS_WIN else [])
     candidates = [os.environ.get("HERMES_BIN"), shutil.which("hermes")]
-    candidates.append(str(Path.home() / ".hermes" / "hermes-agent" / ".hermes" / "bin" / "hermes"))
-    candidates.append(str(Path.home() / ".local" / "bin" / "hermes"))
+    for d in (Path.home() / ".hermes" / "hermes-agent" / ".hermes" / "bin", Path.home() / ".local" / "bin"):
+        candidates += [str(d / n) for n in names]
     for c in candidates:
         if c and os.path.isfile(c) and os.access(c, os.X_OK):
             return c
     return None
+
+
+def hermes_argv(path: str) -> List[str]:
+    """Windows cannot execute the extension-less shell script that Hermes' Git-Bash installer creates; run it through bash."""
+    if IS_WIN and Path(path).suffix.lower() not in WIN_EXEC_EXT:
+        bash = shutil.which("bash") or next((str(Path(b) / "Git" / "bin" / "bash.exe") for b in (os.environ.get("ProgramFiles"), os.environ.get("ProgramFiles(x86)")) if b and (Path(b) / "Git" / "bin" / "bash.exe").is_file()), None)
+        if bash:
+            return [bash, path]
+    return [path]
 
 
 async def hermes_status() -> Dict[str, Any]:
@@ -209,7 +223,7 @@ async def hermes_status() -> Dict[str, Any]:
     version = None
     try:
         proc = await asyncio.create_subprocess_exec(
-            path, "--version", stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.STDOUT
+            *hermes_argv(path), "--version", stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.STDOUT
         )
         out, _ = await asyncio.wait_for(proc.communicate(), timeout=10)
         version = out.decode(errors="replace").strip().splitlines()[0] if out.strip() else None
@@ -328,7 +342,7 @@ async def _login() -> None:
     try:
         await broadcast({"type": "auth_progress", "stage": "login", "line": "start"})
         rc = await asyncio.wait_for(
-            stream_process([find_hermes() or "hermes", "auth", "add", AUTH_PROVIDER, "--type", "oauth"], "login"), timeout=300
+            stream_process([*hermes_argv(find_hermes() or "hermes"), "auth", "add", AUTH_PROVIDER, "--type", "oauth"], "login"), timeout=300
         )
         await broadcast({"type": "auth_progress", "stage": "login", "line": "exit", "ok": rc == 0})
         if rc == 0 and PLUGIN_NAME and find_agy() and not plugin_enabled():
@@ -392,7 +406,7 @@ async def _enable_plugin() -> None:
         else:
             await broadcast({"type": event, "stage": "plugin", "line": "start", "plugin": PLUGIN_NAME})
             rc = await asyncio.wait_for(
-                stream_process([find_hermes() or "hermes", "plugins", "enable", PLUGIN_NAME], "plugin", event=event), timeout=120
+                stream_process([*hermes_argv(find_hermes() or "hermes"), "plugins", "enable", PLUGIN_NAME], "plugin", event=event), timeout=120
             )
             if rc == 0:
                 PLUGIN_MARKER.parent.mkdir(parents=True, exist_ok=True)
@@ -512,7 +526,7 @@ async def run_hermes(
     with tempfile.NamedTemporaryFile("w", suffix=".txt", delete=False, encoding="utf-8") as f:
         f.write(prompt)
         qfile = f.name
-    cmd = [path, "chat", "--query-file", qfile, "-Q", "--oneshot"]
+    cmd = [*hermes_argv(path), "chat", "--query-file", qfile, "-Q", "--oneshot"]
     if model:
         cmd += ["-m", model]
     if provider:
@@ -623,7 +637,7 @@ async def run_cli(*args: str, timeout: float = 30) -> str:
         raise HermesNotFound("Hermes CLI not found")
     env = utf8_env({"COLUMNS": "400", "NO_COLOR": "1"})
     proc = await asyncio.create_subprocess_exec(
-        path, *args, stdin=asyncio.subprocess.DEVNULL, stdout=asyncio.subprocess.PIPE,
+        *hermes_argv(path), *args, stdin=asyncio.subprocess.DEVNULL, stdout=asyncio.subprocess.PIPE,
         stderr=asyncio.subprocess.STDOUT, env=env,
     )
     try:
@@ -2031,7 +2045,21 @@ async def static_files(path: str = "") -> FileResponse:
     return FileResponse(root / "index.html", headers=nocache)
 
 
+def _ensure_streams() -> None:
+    """Under pythonw.exe (the Windows service) sys.stdout/sys.stderr are None, which crashes uvicorn's logging; log to a file instead."""
+    if sys.stdout is not None and sys.stderr is not None:
+        return
+    d = Path.home() / ".hermes-office"
+    d.mkdir(parents=True, exist_ok=True)
+    f = open(d / "bridge.log", "a", encoding="utf-8", buffering=1)
+    if sys.stdout is None:
+        sys.stdout = f
+    if sys.stderr is None:
+        sys.stderr = f
+
+
 def main() -> None:
+    _ensure_streams()
     prune_docs()
     import uvicorn
 

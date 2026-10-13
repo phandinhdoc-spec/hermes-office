@@ -62,6 +62,18 @@ Mô hình AI: **Gemini 3.8 Flash** trả lời nhanh khi bạn sửa nhanh (phí
 | Đăng nhập báo thất bại | Bấm lại nút đăng nhập; kiểm tra mạng; thử trình duyệt khác làm mặc định. |
 | Xem nhật ký lỗi | File `~/.hermes-office/bridge.log` (Windows: `C:\Users\<tên bạn>\.hermes-office\bridge.log`). |
 
+### Sự cố riêng trên Windows
+
+| Hiện tượng | Nguyên nhân thường gặp và cách xử lý |
+|---|---|
+| `bash\r: No such file`, `$'\r': command not found` | File `.sh` bị đổi thành xuống dòng kiểu Windows (CRLF) khi `git clone`. Dự án đã có `.gitattributes` ép LF; nếu bạn đã clone trước đó, chạy `git rm --cached -r . && git reset --hard` hoặc tải lại ZIP. |
+| "Thieu python" dù đã cài | Windows có "python giả" mở Microsoft Store. Trình cài giờ tự bỏ qua bản giả và tìm bản thật (hoặc dùng `py -3`). Nếu vẫn lỗi: cài Python từ python.org, tick *Add python.exe to PATH*, mở cửa sổ mới. |
+| "schtasks /Create failed" hoặc dịch vụ không tự chạy khi đăng nhập | Tạo tác vụ định kỳ cần quyền quản trị. Không có quyền thì trình cài tự chuyển sang mục khởi động của riêng bạn (`HKCU\...\Run`) và vẫn chạy cầu nối ngay. |
+| Cầu nối chạy rồi tự tắt, không có log | Bản chạy ngầm (`pythonw.exe`) không có cửa sổ console nên trước đây bị sập âm thầm. Giờ log luôn được ghi vào `C:\Users\<tên bạn>\.hermes-office\bridge.log`. |
+| "Hermes CLI not found" dù đã cài Hermes | Hermes cài qua Git Bash là một script không có đuôi `.exe`; cầu nối giờ tự chạy nó qua Git Bash. Có thể đặt biến `HERMES_BIN` trỏ tới file `hermes` để chỉ rõ. |
+| Đọc PDF báo thiếu công cụ | Windows không có `pdftotext`; `pypdf` (đã có trong `requirements.txt`) sẽ được dùng. Chạy lại `install.bat` để cài. |
+| Chạy tay để xem lỗi | Mở Git Bash trong thư mục dự án: `bridge/.venv/Scripts/python.exe bridge/hermes_office_bridge.py --port 8765` rồi mở https://localhost:8765/health |
+
 ### Thêm thủ công (Windows, khi không tự đăng ký được)
 1. Tạo thư mục, ví dụ `C:\HermesCatalog`, chép `manifest.xml` vào đó, rồi **chia sẻ (Share)** thư mục này.
 2. Trong Word: **File → Options → Trust Center → Trust Center Settings → Trusted Add-in Catalogs**, dán đường dẫn chia sẻ dạng `\\TÊN-MÁY\HermesCatalog`, tích **Show in Menu**, bấm OK, khởi động lại Word.

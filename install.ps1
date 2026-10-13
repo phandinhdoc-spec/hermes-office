@@ -33,17 +33,48 @@ function Ensure($cmd, $wingetId, $vi, $en) {
   } else { throw (T "Can $cmd de tiep tuc." "$cmd is required to continue.") }
 }
 
+# python.exe on PATH may be the Microsoft Store stub, which exists but only opens the Store: run it to be sure.
+function Have-Python {
+  foreach ($c in @('py -3', 'python', 'python3')) {
+    $parts = $c -split ' '
+    if (-not (Have $parts[0])) { continue }
+    try {
+      $a = @(); if ($parts.Count -gt 1) { $a += $parts[1] }
+      $a += @('-c', 'import sys; sys.exit(0 if sys.version_info >= (3,9) else 1)')
+      & $parts[0] @a 2>$null | Out-Null
+      if ($LASTEXITCODE -eq 0) { return $true }
+    } catch { }
+  }
+  return $false
+}
+# Git Bash wherever Git was installed (Program Files, per-user winget, or next to git.exe). Never the WSL bash.exe.
+function Find-GitBash {
+  $c = @()
+  foreach ($base in @($env:ProgramFiles, ${env:ProgramFiles(x86)}, "$env:LOCALAPPDATA\Programs")) { if ($base) { $c += (Join-Path $base 'Git\bin\bash.exe') } }
+  $git = Get-Command git -ErrorAction SilentlyContinue
+  if ($git) { $c += (Join-Path (Split-Path (Split-Path $git.Source)) 'bin\bash.exe') }
+  foreach ($p in $c) { if ($p -and (Test-Path $p)) { return $p } }
+  return $null
+}
+
 Say (T 'Cai dat Hermes cho Office' 'Installing Hermes for Office')
 Ensure 'git'    'Git.Git'              'Ban co muon tu dong cai Git khong? (can thiet)'        'Install Git automatically? (required)'
-Ensure 'python' 'Python.Python.3.12'   'Ban co muon tu dong cai Python khong? (can thiet)'     'Install Python automatically? (required)'
+if (Have-Python) { Say "python : $(T 'da co' 'already installed')" }
+else {
+  if (-not (Have 'winget')) { throw (T 'Thieu Python 3.9+ va may khong co winget. Hay cai Python tu python.org roi chay lai.' 'Python 3.9+ is missing and winget is unavailable. Install it from python.org and re-run.') }
+  if (Ask 'Ban co muon tu dong cai Python khong? (can thiet)' 'Install Python automatically? (required)') {
+    winget install --id Python.Python.3.12 -e --accept-package-agreements --accept-source-agreements
+    Refresh-Path
+    if (-not (Have-Python)) { throw (T 'Da cai Python nhung chua dung duoc. Hay dong cua so nay va chay lai install.bat.' 'Python was installed but is not usable yet. Close this window and run install.bat again.') }
+  } else { throw (T 'Can Python de tiep tuc.' 'Python is required to continue.') }
+}
 if (-not (Test-Path (Join-Path $Root 'addin\dist\index.html'))) {
   Ensure 'node' 'OpenJS.NodeJS.LTS'    'Ban co muon tu dong cai Node.js khong? (can de bien dich giao dien)' 'Install Node.js automatically? (needed to build the UI)'
 }
 
 # Hermes Agent: official installer runs under Git Bash (use WSL if you prefer the Linux build).
-$bash = Join-Path ${env:ProgramFiles} 'Git\bin\bash.exe'
-if (-not (Test-Path $bash)) { $bash = (Get-Command bash -ErrorAction SilentlyContinue).Source }
-if (-not $bash) { throw (T 'Khong tim thay Git Bash.' 'Git Bash not found.') }
+$bash = Find-GitBash
+if (-not $bash) { throw (T 'Khong tim thay Git Bash. Hay cai Git for Windows roi chay lai.' 'Git Bash not found. Install Git for Windows and re-run.') }
 $hasHermes = (Have 'hermes') -or (Test-Path "$HOME\.hermes\hermes-agent\.hermes\bin\hermes*") -or (Test-Path "$HOME\.local\bin\hermes*")
 if ($hasHermes) { Say "Hermes Agent: $(T 'da co' 'already installed')" }
 elseif (Ask 'Ban co muon tu dong tai & cai Hermes Agent khong?' 'Download and install Hermes Agent automatically?') {

@@ -237,10 +237,29 @@ do_deps() {
     (cd "$ROOT/addin" && npm install --no-audit --no-fund && npm run build)
   fi
   say "Setting up bridge virtualenv"
-  local py; py="$(command -v python3 || command -v python || true)"
-  [ -n "$py" ] || die "python3 is required for the bridge"
-  if [ ! -x "$VENV_PY" ]; then "$py" -m venv "$ROOT/bridge/.venv"; fi
+  local py; py="$(pick_python || true)"
+  [ -n "$py" ] || die "Python 3.9+ is required for the bridge (on Windows: install it from python.org or 'winget install Python.Python.3.12', then reopen the window)"
+  if [ ! -x "$VENV_PY" ] && [ ! -f "$VENV_PY" ]; then
+    if [ "$py" = "py -3" ]; then py -3 -m venv "$ROOT/bridge/.venv"; else "$py" -m venv "$ROOT/bridge/.venv"; fi || die "could not create the virtualenv with: $py"
+  fi
   "$VENV_PIP" install -q -r "$ROOT/bridge/requirements.txt"
+}
+
+# A usable Python 3.9+. Tries python3, python and the Windows launcher; the version check also rejects the
+# Microsoft Store stub (python.exe in WindowsApps), which exists on PATH but only opens the Store.
+pick_python() {
+  local c p
+  # Every python3/python on PATH, in order: a Store stub early on PATH must not hide the real interpreter behind it.
+  for c in python3 python; do
+    while IFS= read -r p; do
+      [ -n "$p" ] || continue
+      if "$p" -c 'import sys; sys.exit(0 if sys.version_info >= (3, 9) else 1)' >/dev/null 2>&1; then printf '%s' "$p"; return 0; fi
+    done < <(type -aP "$c" 2>/dev/null)
+  done
+  if command -v py >/dev/null 2>&1 && py -3 -c 'import sys; sys.exit(0 if sys.version_info >= (3, 9) else 1)' >/dev/null 2>&1; then
+    printf '%s' "py -3"; return 0
+  fi
+  return 1
 }
 
 # --------------------------------------------------------------------------- daemon
@@ -257,6 +276,22 @@ wait_healthy() {
 
 # schtasks args start with "/", which MSYS would rewrite as paths.
 schtasks_() { MSYS_NO_PATHCONV=1 MSYS2_ARG_CONV_EXCL='*' schtasks "$@"; }
+
+# Creating an ONLOGON scheduled task needs admin rights. Without them we fall back to the per-user Run key
+# (no admin needed) and start the bridge directly.
+RUN_KEY='HKCU\Software\Microsoft\Windows\CurrentVersion\Run'
+RUN_NAME="HermesOfficeBridge"
+RUN_MARK="$LOG_DIR/autostart-runkey"
+win_reg() { MSYS_NO_PATHCONV=1 MSYS2_ARG_CONV_EXCL='*' reg.exe "$@"; }
+win_ps() { powershell.exe -NoProfile -ExecutionPolicy Bypass -Command "$1"; }
+win_start_now() {
+  local pyw script dir
+  pyw="$(cygpath -w "$VENV_PYW")"; script="$(cygpath -w "$ROOT/bridge/hermes_office_bridge.py")"; dir="$(cygpath -w "$ROOT/bridge")"
+  win_ps "Start-Process -WindowStyle Hidden -FilePath '$pyw' -WorkingDirectory '$dir' -ArgumentList '\"$script\"','--port','$PORT'" >/dev/null
+}
+win_stop_now() {
+  win_ps "Get-NetTCPConnection -LocalPort $PORT -State Listen -ErrorAction SilentlyContinue | ForEach-Object { Stop-Process -Id \$_.OwningProcess -Force -ErrorAction SilentlyContinue }" >/dev/null 2>&1 || true
+}
 
 service_install() {
   [ -x "$VENV_PY" ] || [ -f "$VENV_PY" ] || die "bridge virtualenv missing; run ./install.sh first"
@@ -298,10 +333,19 @@ EOF
     windows)
       local pyw script
       pyw="$(cygpath -w "$VENV_PYW")"; script="$(cygpath -w "$ROOT/bridge/hermes_office_bridge.py")"
-      schtasks_ /Create /F /SC ONLOGON /RL LIMITED /TN "$TASK_NAME" \
-        /TR "\"$pyw\" \"$script\" --port $PORT" >/dev/null || die "schtasks /Create failed"
-      schtasks_ /End /TN "$TASK_NAME" >/dev/null 2>&1 || true
-      schtasks_ /Run /TN "$TASK_NAME" >/dev/null || die "schtasks /Run failed" ;;
+      if schtasks_ /Create /F /SC ONLOGON /RL LIMITED /TN "$TASK_NAME" \
+           /TR "\"$pyw\" \"$script\" --port $PORT" >/dev/null 2>&1; then
+        rm -f "$RUN_MARK"
+        schtasks_ /End /TN "$TASK_NAME" >/dev/null 2>&1 || true
+        win_stop_now
+        schtasks_ /Run /TN "$TASK_NAME" >/dev/null 2>&1 || { warn "schtasks /Run failed; starting the bridge directly"; win_start_now; }
+      else
+        warn "No permission to create a scheduled task; using the per-user startup entry instead"
+        win_reg add "$RUN_KEY" /v "$RUN_NAME" /t REG_SZ /d "\"$pyw\" \"$script\" --port $PORT" /f >/dev/null || die "could not register the startup entry"
+        : > "$RUN_MARK"
+        win_stop_now
+        win_start_now
+      fi ;;
   esac
   if wait_healthy; then say "Service running: https://localhost:$PORT/index.html (logs: $LOG_DIR/bridge.log)"
   else warn "Service did not become healthy; check $LOG_DIR/bridge.log"; fi
@@ -312,7 +356,7 @@ service_stop() {
     mac)
       # bootout unloads the job so KeepAlive does not respawn it; service-start re-bootstraps.
       launchctl bootout "gui/$(id -u)" "$PLIST" >/dev/null 2>&1 || true ;;
-    windows) schtasks_ /End /TN "$TASK_NAME" >/dev/null 2>&1 || true ;;
+    windows) schtasks_ /End /TN "$TASK_NAME" >/dev/null 2>&1 || true; win_stop_now ;;
   esac
   say "Service stopped"
 }
@@ -321,7 +365,10 @@ service_uninstall() {
   service_stop
   case "$OS" in
     mac) rm -f "$PLIST" ;;
-    windows) schtasks_ /Delete /F /TN "$TASK_NAME" >/dev/null 2>&1 || true ;;
+    windows)
+      schtasks_ /Delete /F /TN "$TASK_NAME" >/dev/null 2>&1 || true
+      win_reg delete "$RUN_KEY" /v "$RUN_NAME" /f >/dev/null 2>&1 || true
+      rm -f "$RUN_MARK" ;;
   esac
   say "Service removed"
 }
@@ -332,7 +379,10 @@ service_start() {
       [ -f "$PLIST" ] || die "service not installed; run ./install.sh service-install"
       launchctl bootstrap "gui/$(id -u)" "$PLIST" >/dev/null 2>&1 || true
       launchctl kickstart "gui/$(id -u)/$LABEL" >/dev/null 2>&1 || true ;;
-    windows) schtasks_ /Run /TN "$TASK_NAME" >/dev/null || die "service not installed; run ./install.sh service-install" ;;
+    windows)
+      if schtasks_ /Query /TN "$TASK_NAME" >/dev/null 2>&1; then schtasks_ /Run /TN "$TASK_NAME" >/dev/null 2>&1 || win_start_now
+      elif [ -f "$RUN_MARK" ]; then win_start_now
+      else die "service not installed; run ./install.sh service-install"; fi ;;
   esac
   if wait_healthy; then say "Service started"; else warn "Service not healthy yet; see $LOG_DIR/bridge.log"; fi
 }
@@ -344,7 +394,7 @@ service_status() {
       [ -f "$PLIST" ] && installed=yes
       launchctl print "gui/$(id -u)/$LABEL" >/dev/null 2>&1 && manager=loaded ;;
     windows)
-      schtasks_ /Query /TN "$TASK_NAME" >/dev/null 2>&1 && installed=yes ;;
+      { schtasks_ /Query /TN "$TASK_NAME" >/dev/null 2>&1 || [ -f "$RUN_MARK" ]; } && installed=yes ;;
   esac
   curl -ksf "https://127.0.0.1:$PORT/health" >/dev/null 2>&1 && health=up
   echo "service: installed=$installed manager=$manager health(https://localhost:$PORT)=$health"
