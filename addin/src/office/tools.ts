@@ -2,6 +2,7 @@ import { currentHost } from "./host";
 import * as word from "./word";
 import * as excel from "./excel";
 import * as ppt from "./powerpoint";
+import { extraTools } from "./extra";
 
 type Args = Record<string, any>;
 type Handler = (a: Args) => Promise<unknown>;
@@ -43,6 +44,8 @@ export const tools: Record<string, Handler> = {
   office_ppt_get_theme: (a) => ppt.getTheme(a.slideIndex),
   office_ppt_format_shape: (a) => ok(ppt.formatShape(Number(a.slideIndex ?? 0), String(a.shapeId), a)),
   office_ppt_apply_format: (a) => ppt.applyFormat(a),
+
+  ...extraTools, // skill-set tools: ppt_extra.ts, word_extra.ts, excel_extra.ts
 };
 
 export async function callTool(name: string, args: Args = {}): Promise<unknown> {
