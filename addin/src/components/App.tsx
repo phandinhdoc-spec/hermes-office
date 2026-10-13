@@ -450,8 +450,8 @@ export default function App() {
 
   return (
     <div className="hx relative flex h-full flex-col overflow-hidden">
-      {/* Header: one 32px row */}
-      <header className="flex h-8 shrink-0 items-center gap-1 border-b border-gray-500/20 px-2">
+      {/* Header: one 32px row (pr-8 to prevent collision with Office taskpane overlay controls) */}
+      <header className="flex h-8 shrink-0 items-center gap-1 border-b border-gray-500/20 px-2 pr-9">
         <span data-tip={t("header.bridge", { state: t(`conn.${conn}`) }) + (hermes ? t(hermes.installed ? "header.hermesOk" : "header.hermesMissing") : "")} data-tip-left="" className="flex items-center gap-1.5">
           <StatusDot tone={hermes && !hermes.installed ? "bad" : connTone} pulse={conn === "connecting"} />
           <strong className="text-[12px] font-semibold">Hermes</strong>

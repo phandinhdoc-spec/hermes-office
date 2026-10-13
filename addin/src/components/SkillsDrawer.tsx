@@ -39,7 +39,7 @@ export default function SkillsDrawer({ open, skills, active, onChange, onRefresh
       aria-label={t("skillsDrawer.title")}
       onKeyDown={(e) => e.key === "Escape" && !detailName && onClose()}
     >
-      <div className="flex items-center gap-1 border-b border-gray-500/20 px-2 py-1.5">
+      <div className="flex items-center gap-1 border-b border-gray-500/20 px-2 pr-9 py-1.5">
         <strong className="flex-1 text-[12px]">
           {t("skillsDrawer.title")} <span className="font-normal text-gray-500">· {t("skillsDrawer.active", { n: active.length })}</span>
         </strong>
