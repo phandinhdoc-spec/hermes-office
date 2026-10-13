@@ -25,23 +25,39 @@ import SessionsDrawer from "./SessionsDrawer";
 import SkillCreateModal from "./SkillCreateModal";
 import SkillsDrawer from "./SkillsDrawer";
 import {
-  effectiveRules, loadMsgs, loadWorkspace, newChatMeta, removeMsgs, saveMsgs, saveWorkspace, titleFrom, uid,
-  type Msg, type Project, type Workspace,
+  chatTokens, effectiveMemory, effectiveRules, fillTemplate, isLinked, loadAtt, loadMsgs, loadWorkspace, newChatMeta, removeMsgs, saveAtt, saveMsgs, saveWorkspace, setLinked, titleFrom, toMarkdown, uid,
+  type Attachment, type Mode, type Msg, type Project, type Template, type Workspace,
 } from "../lib/workspace";
 import ToolsPanel from "./ToolsPanel";
+import ApprovalCard from "./ApprovalCard";
+import AttachMenu from "./AttachMenu";
+import MemoryModal from "./MemoryModal";
+import ModeSelector from "./ModeSelector";
+import MoreMenu from "./MoreMenu";
+import RichText from "./RichText";
+import TemplatesModal from "./TemplatesModal";
+import { gotoRef } from "../office/goto";
+import type { Snapshot } from "../office/snapshot";
 import TooltipHost from "./TooltipHost";
 import {
-  IconButton, IconCheck, IconChevron, IconCopy, IconEdit, IconFolder, IconInsert, IconPlus, IconRules, IconSelection, IconSend, IconSkills, IconStop, IconTools, IconTrash, IconX, Pill, StatusDot,
+  IconButton, IconCheck, IconChevron, IconCopy, IconEdit, IconFolder, IconInsert, IconLink, IconPlus, IconRules, IconSelection, IconSend, IconUndo, IconSkills, IconStop, IconTools, IconTrash, IconX, Pill, StatusDot,
 } from "./ui";
 
 /** The CLI's quiet mode appends a `session_id:` footer; never insert that into a document. */
-const clean = (t: string) => t.replace(/\s*session_id: \S+\s*$/, "");
+/** What the bridge needs to find an attachment again; legacy entries keep their text so the bridge can adopt them. */
+const attRef = (a: Attachment) => (a.doc_id ? { name: a.name, doc_id: a.doc_id } : { name: a.name, text: a.text });
+
+const clean = (t: string) => t.replace(/\s*session_id: \S+\s*$/, "").replace(/```office-memory[\s\S]*?```/g, "");
 
 const INLINE_IDLE: InlineState = { open: false, scope: "selection", target: "", output: "", busy: false, error: null };
 type Sel = { model: string | null; provider: string | null };
 
-const CHIPS: { id: "summarize" | "proofread" | "translate" | "table" }[] = [
-  { id: "summarize" }, { id: "proofread" }, { id: "translate" }, { id: "table" },
+// One colour family per quick action; light and dark variants are separate literal classes so Tailwind keeps them.
+const CHIPS: { id: "summarize" | "proofread" | "translate" | "table"; cls: string }[] = [
+  { id: "summarize", cls: "border-sky-600/40 bg-sky-500/10 text-sky-700 hover:bg-sky-500/20 dark:border-sky-400/40 dark:bg-sky-400/10 dark:text-sky-300 dark:hover:bg-sky-400/20" },
+  { id: "proofread", cls: "border-emerald-600/40 bg-emerald-500/10 text-emerald-700 hover:bg-emerald-500/20 dark:border-emerald-400/40 dark:bg-emerald-400/10 dark:text-emerald-300 dark:hover:bg-emerald-400/20" },
+  { id: "translate", cls: "border-amber-600/40 bg-amber-500/10 text-amber-700 hover:bg-amber-500/20 dark:border-amber-400/40 dark:bg-amber-400/10 dark:text-amber-300 dark:hover:bg-amber-400/20" },
+  { id: "table", cls: "border-fuchsia-600/40 bg-fuchsia-500/10 text-fuchsia-700 hover:bg-fuchsia-500/20 dark:border-fuchsia-400/40 dark:bg-fuchsia-400/10 dark:text-fuchsia-300 dark:hover:bg-fuchsia-400/20" },
 ];
 
 const ERR_KEYS: Record<string, Key> = {
@@ -88,6 +104,20 @@ export default function App() {
   const activeIdRef = useRef<string>(ws.activeId);
   const [sessionsOpen, setSessionsOpen] = useState(false);
   const [rulesModal, setRulesModal] = useState<{ kind: "global" } | { kind: "project"; id: string | "new" } | null>(null);
+  const [undo, setUndo] = useState<Snapshot[]>([]);
+  const [notice, setNotice] = useState<string | null>(null);
+  const [approval, setApproval] = useState<{ rid: string; calls: { tool: string; args: unknown }[] } | null>(null);
+  const [proposals, setProposals] = useState<{ id: string; note: string }[]>([]);
+  const [att, setAtt] = useState<Attachment[]>(() => loadAtt(ws.activeId));
+  const [extractedIn, setExtractedIn] = useState<Extract<BridgeEvent, { type: "extracted" }> | null>(null);
+  const [summaryIn, setSummaryIn] = useState<Extract<BridgeEvent, { type: "summary" }> | null>(null);
+  const [summarizing, setSummarizing] = useState<string | null>(null);
+  const [warnOff, setWarnOff] = useState<string[]>([]);
+  const [memoryOpen, setMemoryOpen] = useState(false);
+  const [tplOpen, setTplOpen] = useState(false);
+  const [slashQ, setSlashQ] = useState<string | null>(null);
+  const turnLabel = useRef<Record<string, string>>({});
+  const attPending = useRef<Record<string, string>>({});
   const [skillCreate, setSkillCreate] = useState<{ open: boolean; busy: boolean; error: string | null }>({ open: false, busy: false, error: null });
   // Nội dung ô chat nằm trong DOM (ImeTextarea, uncontrolled) để không làm hỏng bộ gõ tiếng Việt; state chỉ giữ cờ "có chữ".
   const [hasInput, setHasInput] = useState(false);
@@ -257,7 +287,28 @@ export default function App() {
       case "error":
         setError(e.code && `err.${e.code}` in ERR_KEYS ? tRef.current(ERR_KEYS[`err.${e.code}`]) : e.message);
         break;
+      case "approval_request":
+        setApproval({ rid: e.rid, calls: e.calls });
+        break;
+      case "memory_proposal":
+        setProposals((p) => (p.some((x) => x.note === e.note) ? p : [...p, { id: crypto.randomUUID().slice(0, 8), note: e.note }]));
+        break;
+      case "extracted":
+        setExtractedIn(e);
+        break;
+      case "attachments":
+        // The bridge is the source of truth for what it still holds; keep only metadata here.
+        setAtt((cur) => {
+          const next: Attachment[] = e.items.filter((x) => x.ok).map((x) => ({ name: x.name, doc_id: x.doc_id, chars: x.chars, chunks: x.chunks, mode: x.mode }));
+          if (e.items.some((x) => !x.ok)) setNotice(tRef.current("att.missing", { name: e.items.filter((x) => !x.ok).map((x) => x.name).join(", ") }));
+          return JSON.stringify(next) === JSON.stringify(cur) ? cur : next;
+        });
+        break;
+      case "summary":
+        setSummaryIn(e);
+        break;
       case "done":
+        setApproval(null);
         setBusy(null);
         setMsgs((m) => (m.some((x) => x.pending) ? m.map((x) => (x.pending ? { ...x, pending: false, ok: false } : x)) : m));
         break;
@@ -268,6 +319,9 @@ export default function App() {
     const c = new BridgeClient(onEvent, (s) => {
       setConn(s);
       if (s === "open") {
+        c.send({ type: "set_mode", mode: wsRef.current.mode });
+        c.send({ type: "set_memory", memory: effectiveMemory(wsRef.current) });
+        c.send({ type: "set_attachments", items: loadAtt(activeIdRef.current).map(attRef) });
         for (const type of ["list_models", "list_skills", "list_tools", "auth_status"]) c.send({ type });
         c.send({ type: "set_reasoning", level: wsRef.current.reasoning });
         c.send({ type: "set_rules", rules: effectiveRules(wsRef.current) });
@@ -277,6 +331,9 @@ export default function App() {
           .map((m) => ({ role: m.role, content: m.text }));
         if (hist.length) c.send({ type: "restore_history", messages: hist });
       }
+    }, (turn, snap, err) => {
+      if (snap) setUndo((u) => [...u, { ...snap, label: (turnLabel.current[turn] ?? snap.label).slice(0, 50) }].slice(-5));
+      else setError(tRef.current("undo.noSnap", { msg: err ?? "?" }));
     });
     client.current = c;
     c.connect();
@@ -297,8 +354,14 @@ export default function App() {
   const taRef = useRef<ImeTextareaHandle>(null);
 
   const send = async (override?: string) => {
-    const text = (override ?? taRef.current?.getValue() ?? "").trim();
+    let text = (override ?? taRef.current?.getValue() ?? "").trim();
     if (!text || busy) return;
+    if (/\{[^}]+\}/.test(text)) {
+      let sel = "";
+      try { sel = await getSelectionText(); } catch { /* no selection available */ }
+      text = fillTemplate(text, { selection: sel, file: (Office.context.document?.url || "").split(/[\\/]/).pop() || "", app: currentHost() });
+    }
+    setSlashQ(null);
     stick.current = true;
     setError(null);
     let context: string | undefined;
@@ -311,6 +374,7 @@ export default function App() {
       setError(t("err.readSelection", { msg: e instanceof Error ? e.message : String(e) }));
     }
     const id = crypto.randomUUID();
+    turnLabel.current[id] = text;
     updateWs((w) => ({ ...w, chats: w.chats.map((c) => (c.id === w.activeId ? { ...c, updated: Date.now() } : c)) }));
     setMsgs((m) => [...m, { id: id + "-u", role: "user", text }]);
     taRef.current?.setValue("");
@@ -375,6 +439,9 @@ export default function App() {
     updateWs((w) => ({ ...w, activeId: id }));
     exitSelect();
     setError(null);
+    setProposals([]);
+    setApproval(null);
+    setAtt(loadAtt(id));
     safeSend({ type: "reset" });
     const hist = next.filter((m) => (m.role === "user" || m.role === "assistant") && m.text).map((m) => ({ role: m.role, content: m.text }));
     if (hist.length) safeSend({ type: "restore_history", messages: hist });
@@ -421,7 +488,7 @@ export default function App() {
     if (m.kind === "global") {
       updateWs((w) => ({ ...w, globalRules: rules }));
     } else if (m.id === "new") {
-      const proj: Project = { id: uid(), name, rules, skills: [] };
+      const proj: Project = { id: uid(), name, rules, skills: [], memory: [] };
       updateWs((w) => ({ ...w, projects: [...w.projects, proj] }));
       newChat(proj.id);
     } else {
@@ -433,6 +500,150 @@ export default function App() {
     safeSend({ type: "set_reasoning", level });
   };
   const rulesStr = effectiveRules(ws);
+  const memStr = effectiveMemory(ws);
+  useEffect(() => {
+    if (conn === "open") safeSend({ type: "set_memory", memory: memStr });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [conn, memStr]);
+  useEffect(() => {
+    if (!saveAtt(activeIdRef.current, att)) setNotice(tRef.current("att.notSaved"));
+    if (conn === "open") safeSend({ type: "set_attachments", items: att.map(attRef) });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [conn, att]);
+  useEffect(() => {
+    if (!notice) return;
+    const id = window.setTimeout(() => setNotice(null), 7000);
+    return () => window.clearTimeout(id);
+  }, [notice]);
+
+  // 4. templates visible in the current chat
+  const curProjectId = ws.chats.find((c) => c.id === ws.activeId)?.projectId ?? null;
+  const curProject = ws.projects.find((p) => p.id === curProjectId);
+  const userTemplates = ws.templates.filter((x) => !x.projectId || x.projectId === curProjectId);
+  const slashItems: { key: string; name: string; prompt: string }[] = [
+    ...CHIPS.map((c) => ({ key: c.id, name: t(`chip.${c.id}`), prompt: t(`chip.${c.id}.prompt`) })),
+    ...userTemplates.map((x) => ({ key: x.id, name: x.name, prompt: x.prompt })),
+  ].filter((x) => slashQ !== null && x.name.toLowerCase().includes(slashQ.toLowerCase()));
+  const pickSlash = (prompt: string) => {
+    taRef.current?.setValue(prompt);
+    setHasInput(true);
+    setSlashQ(null);
+    setTimeout(() => taRef.current?.focus(), 0);
+  };
+
+  // 5 + 9. modes and approval
+  const changeMode = (m: Mode) => {
+    updateWs((w) => ({ ...w, mode: m }));
+    safeSend({ type: "set_mode", mode: m });
+  };
+  const answerApproval = (ok: boolean) => {
+    if (!approval) return;
+    safeSend({ type: "approval_response", rid: approval.rid, ok });
+    setApproval(null);
+  };
+
+  // 3. undo
+  const undoLast = async () => {
+    const snap = undo[undo.length - 1];
+    if (!snap || busy) return;
+    try {
+      await snap.restore();
+      setUndo((u) => u.slice(0, -1));
+      setNotice(t("undo.done", { label: snap.label }) + (snap.note ? " " + t("undo.note", { note: snap.note }) : ""));
+    } catch (e) {
+      setError(t("undo.failed", { msg: e instanceof Error ? e.message : String(e) }));
+    }
+  };
+
+  // 7. memory
+  const saveNote = (p: { id: string; note: string }) => {
+    const note = { id: uid(), text: p.note };
+    if (curProjectId) updateWs((w) => ({ ...w, projects: w.projects.map((x) => (x.id === curProjectId ? { ...x, memory: [...x.memory, note] } : x)) }));
+    else updateWs((w) => ({ ...w, memory: [...w.memory, note] }));
+    setProposals((l) => l.filter((x) => x.id !== p.id));
+  };
+
+  // 6. attachments
+  const addFile = async (f: File) => {
+    // Raw upload over HTTP: no size cap and no base64 inflation (the WebSocket frame limit does not apply).
+    setNotice(t("att.reading", { name: f.name }));
+    try {
+      const r = await fetch(`/extract?name=${encodeURIComponent(f.name)}`, { method: "POST", body: f });
+      const j = await r.json();
+      setExtractedIn({ type: "extracted", id: crypto.randomUUID(), ok: !!j.ok, name: j.name || f.name, doc_id: j.doc_id, chars: j.chars, chunks: j.chunks, mode: j.mode, message: j.message });
+    } catch (e) {
+      setExtractedIn({ type: "extracted", id: crypto.randomUUID(), ok: false, name: f.name, message: e instanceof Error ? e.message : String(e) });
+    }
+  };
+  const addLink = (url: string) => {
+    const id = crypto.randomUUID();
+    attPending.current[id] = url;
+    safeSend({ type: "extract_url", id, url });
+  };
+  useEffect(() => {
+    if (!extractedIn) return;
+    const e = extractedIn;
+    setExtractedIn(null);
+    delete attPending.current[e.id];
+    if (e.ok && e.doc_id) {
+      setAtt((a) => [...a.filter((x) => x.name !== e.name), { name: e.name, doc_id: e.doc_id, chars: e.chars, chunks: e.chunks, mode: e.mode }]);
+      setNotice(e.mode === "search" ? t("att.searchMode", { name: e.name, chunks: String(e.chunks ?? "?") }) : null);
+    } else setError(t("att.failed", { name: e.name, msg: e.message ?? "?" }));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [extractedIn]);
+
+  // 1 + 2 + 8. summaries, export, context meter
+  const chatTitle = ws.chats.find((c) => c.id === ws.activeId)?.title || "";
+  const tokens = chatTokens(msgs, rulesStr, memStr, att);
+  const fmtTok = (n: number) => (n >= 1000 ? (n / 1000).toFixed(1) + "k" : String(n));
+  const overLimit = ws.tokenLimit > 0 && tokens > ws.tokenLimit;
+  const startSummary = (purpose: "compress" | "insert") => {
+    if (busy || summarizing || !msgs.length) return;
+    const id = crypto.randomUUID();
+    setSummarizing(id);
+    setNotice(t("more.summarizing"));
+    safeSend({ type: "summarize", id, purpose });
+  };
+  useEffect(() => {
+    if (!summaryIn) return;
+    const e = summaryIn;
+    setSummaryIn(null);
+    setSummarizing(null);
+    if (e.failed || e.cancelled || !e.text) return;
+    if (e.purpose === "insert") {
+      replaceSelectionText(e.text).then(() => setNotice(t("more.summaryInserted"))).catch((err) => setError(err instanceof Error ? err.message : String(err)));
+      return;
+    }
+    const cur = wsRef.current.chats.find((c) => c.id === activeIdRef.current);
+    const meta = { ...newChatMeta(cur?.projectId ?? null), title: ("↪ " + (cur?.title || t("chats.untitled"))).slice(0, 40) };
+    saveMsgs(meta.id, [{ id: uid() + "-s", role: "assistant", text: t("ctx.summaryTitle") + "\n\n" + e.text }]);
+    updateWs((w) => ({ ...w, chats: [...w.chats, meta] }));
+    switchTo(meta.id);
+    setSessionsOpen(false);
+    setTab("chat");
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [summaryIn]);
+  const downloadMd = () => {
+    const blob = new Blob([toMarkdown(chatTitle, msgs)], { type: "text/markdown;charset=utf-8" });
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(blob);
+    a.download = ((chatTitle || "hermes-chat").replace(/[\\/:*?"<>|]+/g, "").trim() || "hermes-chat") + ".md";
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    window.setTimeout(() => URL.revokeObjectURL(a.href), 2000);
+  };
+  const copyMd = () => void navigator.clipboard?.writeText(toMarkdown(chatTitle, msgs)).then(() => setNotice(t("more.copied")));
+  const cycleLimit = () => {
+    const order = [20000, 40000, 80000, 0];
+    updateWs((w) => ({ ...w, tokenLimit: order[(order.indexOf(w.tokenLimit) + 1) % order.length] }));
+  };
+
+  // 9. jump to a cited place
+  const jump = (kind: string, target: string) => {
+    gotoRef(kind, target).catch((e) => setError(t("ref.failed", { msg: e instanceof Error ? e.message : String(e) })));
+  };
+
   useEffect(() => {
     if (conn === "open") safeSend({ type: "set_rules", rules: rulesStr });
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -575,6 +786,19 @@ export default function App() {
         </div>
       )}
 
+      {(notice || (overLimit && !warnOff.includes(ws.activeId) && !busy && !summarizing && msgs.length > 0)) && (
+        <div className="shrink-0 space-y-1 px-2 pt-1.5">
+          {notice && <div className="flex items-start gap-1 rounded-lg border border-emerald-500/25 bg-emerald-500/10 px-2 py-1 text-[11px] text-emerald-800 dark:text-emerald-300"><span className="flex-1 break-words">{notice}</span><button type="button" aria-label={t("common.dismiss")} onClick={() => setNotice(null)} className="mt-0.5 opacity-70 hover:opacity-100"><IconX className="h-3 w-3" /></button></div>}
+          {overLimit && !warnOff.includes(ws.activeId) && !busy && !summarizing && msgs.length > 0 && (
+            <div className="flex flex-wrap items-center gap-1.5 rounded-lg border border-amber-500/30 bg-amber-500/10 px-2 py-1 text-[11px] text-amber-800 dark:text-amber-200">
+              <span className="min-w-0 flex-1">{t("ctx.warn", { n: fmtTok(tokens) })}</span>
+              <button type="button" className="h-5 rounded-md bg-amber-600 px-2 text-white hover:bg-amber-500" onClick={() => startSummary("compress")}>{t("ctx.do")}</button>
+              <button type="button" className="h-5 rounded-md border border-amber-500/40 px-2 hover:bg-amber-500/10" onClick={() => setWarnOff((w) => [...w, ws.activeId])}>{t("ctx.later")}</button>
+            </div>
+          )}
+        </div>
+      )}
+
       {!chat && (
         <ToolsPanel
           host={currentHost()}
@@ -624,7 +848,7 @@ export default function App() {
                 ) : (
                   <div className="animate-pop">
                     <div className="whitespace-pre-wrap break-words rounded-xl rounded-bl-sm border border-gray-500/20 bg-gray-500/[0.06] px-2.5 py-1.5 text-[13px]">
-                      {m.text}
+                      <RichText text={m.text} onRef={jump} />
                       {live && <span className="ml-0.5 inline-block h-3 w-[2px] animate-pulse bg-indigo-500 align-middle" />}
                     </div>
                     {!live && !selectMode && (
@@ -673,23 +897,51 @@ export default function App() {
       )}
 
 
-      {/* Toolbar: sessions, rules, inline edit, skills, tools, selection mode */}
+      {/* Toolbar: chats, undo, inline edit, skills, tools, overflow menu */}
       <div className="flex shrink-0 items-center gap-0.5 border-t border-gray-500/20 px-1.5 py-1">
-        <IconButton tip={t("tb.new")} onClick={() => newChat(wsRef.current.chats.find((c) => c.id === ws.activeId)?.projectId ?? null)} disabled={!!busy}><IconPlus /></IconButton>
+        <IconButton tip={t("tb.new")} onClick={() => newChat(curProjectId)} disabled={!!busy}><IconPlus /></IconButton>
         <IconButton tip={t("tb.chats")} onClick={() => setSessionsOpen(true)} active={sessionsOpen}><IconFolder /></IconButton>
-        <IconButton tip={t("tb.rules")} onClick={() => setRulesModal({ kind: "global" })} active={!!ws.globalRules.trim()}><IconRules /></IconButton>
+        <IconButton
+          tip={isLinked() ? t("link.on") : t("link.off")}
+          active={isLinked()}
+          disabled={!!busy}
+          onClick={() => { saveMsgs(activeIdRef.current, histRef.current); setLinked(!isLinked()); window.location.reload(); }}
+        ><IconLink /></IconButton>
+        <IconButton tip={undo.length ? t("tb.undo") + " · " + undo[undo.length - 1].label : t("tb.undoNone")} onClick={() => void undoLast()} disabled={!undo.length || !!busy}><IconUndo /></IconButton>
         <span className="mx-1 h-4 w-px bg-gray-500/25" aria-hidden />
         <IconButton tip={t("header.inline", { key: shortcutLabel })} onClick={() => void openInline()}><IconEdit /></IconButton>
         <IconButton tip={activeSkills.length ? t("header.skillsActive", { n: activeSkills.length }) : t("header.skills")} onClick={() => setSkillsOpen(true)} active={activeSkills.length > 0}><IconSkills /></IconButton>
         <IconButton tip={t("header.tools")} onClick={() => setTab(chat ? "tools" : "chat")} active={!chat}><IconTools /></IconButton>
-        <span className="min-w-0 flex-1 truncate px-1.5 text-center text-[10.5px] text-gray-500">{(() => {
-          const c = ws.chats.find((x) => x.id === ws.activeId);
-          const pr = c?.projectId ? ws.projects.find((x) => x.id === c.projectId) : undefined;
-          return (pr ? pr.name + " › " : "") + (c?.title || t("chats.untitled"));
-        })()}</span>
+        <span className="min-w-0 flex-1 truncate px-1.5 text-center text-[10.5px] text-gray-500" data-tip={t("ctx.meter", { n: fmtTok(tokens) })}>
+          {(curProject ? curProject.name + " › " : "") + (chatTitle || t("chats.untitled"))}
+          {msgs.length > 0 && <span className={"ml-1 " + (overLimit ? "font-semibold text-amber-600" : "opacity-70")}>≈{fmtTok(tokens)}</span>}
+        </span>
         <IconButton tip={selectMode ? t("history.exitSelectMode") : t("history.selectMode")} onClick={() => (selectMode ? exitSelect() : setSelectMode(true))} disabled={!msgs.length} active={selectMode}><IconCheck /></IconButton>
         <IconButton tip={t("history.clearAll")} onClick={() => setConfirmClear(true)} disabled={!msgs.length} danger><IconTrash /></IconButton>
+        <MoreMenu
+          items={[
+            { label: "📐 " + t("tb.rules"), onClick: () => setRulesModal({ kind: "global" }) },
+            { label: "🧠 " + t("more.memory"), onClick: () => setMemoryOpen(true) },
+            { label: "⚡ " + t("more.templates"), onClick: () => setTplOpen(true) },
+            { label: "", onClick: () => {}, sep: true },
+            { label: "⬇ " + t("more.export"), onClick: downloadMd, disabled: !msgs.length },
+            { label: "⧉ " + t("more.copyMd"), onClick: copyMd, disabled: !msgs.length },
+            { label: "📝 " + t("more.insertSummary"), onClick: () => startSummary("insert"), disabled: !msgs.length || !!busy || !!summarizing },
+            { label: "↪ " + t("more.compress"), onClick: () => startSummary("compress"), disabled: !msgs.length || !!busy || !!summarizing },
+            { label: "", onClick: () => {}, sep: true },
+            { label: "📏 " + t("more.limit", { n: ws.tokenLimit ? `${ws.tokenLimit / 1000}k` : t("more.limitOff") }), onClick: cycleLimit },
+          ]}
+        />
       </div>
+
+      {approval && chat && <ApprovalCard calls={approval.calls} onApply={() => answerApproval(true)} onReject={() => answerApproval(false)} />}
+      {chat && proposals.map((p) => (
+        <div key={p.id} className="animate-pop mx-2 mb-1 flex flex-wrap items-center gap-1.5 rounded-lg border border-indigo-500/30 bg-indigo-500/10 px-2 py-1 text-[11px]">
+          <span className="min-w-0 flex-1 break-words">🧠 {t("memory.propose")} <b>{p.note}</b></span>
+          <button type="button" className="h-5 rounded-md bg-indigo-600 px-2 text-white hover:bg-indigo-500" onClick={() => saveNote(p)}>{t("memory.save")}</button>
+          <button type="button" className="h-5 rounded-md border border-gray-500/30 px-2 hover:bg-gray-500/10" onClick={() => setProposals((l) => l.filter((x) => x.id !== p.id))}>{t("memory.skip")}</button>
+        </div>
+      ))}
 
       {/* Composer */}
       <div className={"shrink-0 space-y-1.5 px-2 pb-2 pt-1 " + (chat ? "" : "hidden")}>
@@ -714,22 +966,60 @@ export default function App() {
               data-tip={t(`chip.${c.id}.prompt`)}
               data-tip-up=""
               data-tip-left=""
-              className="inline-flex h-5 items-center rounded-full border border-gray-500/25 px-2 text-[11px] text-gray-600 hover:border-indigo-500/50 hover:bg-indigo-500/10 hover:text-indigo-600 disabled:opacity-40 dark:text-gray-300"
+              className={"inline-flex h-5 items-center rounded-full border px-2 text-[11px] font-medium disabled:opacity-40 " + c.cls}
             >
               {t(`chip.${c.id}`)}
             </button>
           ))}
+          {userTemplates.map((x: Template) => (
+            <button
+              key={x.id}
+              type="button"
+              disabled={!!busy || conn !== "open"}
+              onClick={() => { setUseSelection(true); void send(x.prompt); }}
+              data-tip={x.prompt.slice(0, 120)}
+              className="inline-flex h-5 max-w-[120px] items-center rounded-full border border-violet-600/40 bg-violet-500/10 px-2 text-[11px] font-medium text-violet-700 hover:bg-violet-500/20 disabled:opacity-40 dark:border-violet-400/40 dark:bg-violet-400/10 dark:text-violet-300 dark:hover:bg-violet-400/20"
+            >
+              <span className="truncate">{x.name}</span>
+            </button>
+          ))}
         </div>
-        <div className="rounded-xl border border-gray-500/30 bg-gray-500/[0.04] focus-within:border-indigo-500/60 focus-within:shadow-[0_0_0_3px_rgba(99,102,241,.12)]">
+        <div className="relative rounded-xl border border-gray-500/30 bg-gray-500/[0.04] focus-within:border-indigo-500/60 focus-within:shadow-[0_0_0_3px_rgba(99,102,241,.12)]">
+          {slashQ !== null && slashItems.length > 0 && (
+            <div role="listbox" className="animate-pop absolute bottom-full left-0 z-50 mb-1 max-h-48 w-full overflow-y-auto rounded-xl border border-gray-500/25 bg-white p-1 shadow-xl dark:bg-[#1c1f24]">
+              {slashItems.map((x, i) => (
+                <button key={x.key} type="button" role="option" aria-selected={i === 0} onMouseDown={(e) => e.preventDefault()} onClick={() => pickSlash(x.prompt)} className={"block w-full rounded-md px-2 py-1 text-left hover:bg-gray-500/15 " + (i === 0 ? "bg-gray-500/10" : "")}>
+                  <span className="block truncate text-[12px] font-medium">/{x.name}</span>
+                  <span className="block truncate text-[10.5px] text-gray-500">{x.prompt}</span>
+                </button>
+              ))}
+            </div>
+          )}
+          {att.length > 0 && (
+            <div className="flex flex-wrap gap-1 px-1.5 pt-1.5">
+              {att.map((a) => (
+                <Pill
+                  key={a.name}
+                  tone={a.mode === "search" ? "accent" : "neutral"}
+                  tip={a.mode === "search" ? t("att.pillSearch", { chars: (a.chars ?? 0).toLocaleString(), chunks: String(a.chunks ?? "?") }) : t("att.pillInline", { chars: (a.chars ?? a.text?.length ?? 0).toLocaleString() })}
+                  onRemove={() => setAtt((l) => l.filter((x) => x.name !== a.name))}
+                >
+                  {a.mode === "search" ? "🔎" : "📎"} {a.name.slice(0, 26)}
+                </Pill>
+              ))}
+            </div>
+          )}
           <ImeTextarea
             ref={taRef}
             rows={5}
-            onTextChange={(v) => setHasInput(!!v.trim())}
+            onTextChange={(v) => { setHasInput(!!v.trim()); setSlashQ(v.startsWith("/") && !v.includes("\n") ? v.slice(1) : null); }}
             placeholder={t("composer.placeholder")}
             className="block min-h-[110px] w-full px-2.5 pb-1 pt-2 text-[13px] leading-[1.6] placeholder:text-gray-400"
             onKeyDown={(e) => {
+              if (e.key === "Escape" && slashQ !== null) setSlashQ(null);
               if (e.key === "Enter" && !e.shiftKey && !isImeKey(e)) {
                 e.preventDefault();
+                if (slashQ !== null && slashItems.length) return pickSlash(slashItems[0].prompt);
                 void send();
               }
             }}
@@ -737,11 +1027,13 @@ export default function App() {
           <div className="flex flex-wrap items-center gap-1 px-1.5 pb-1.5">
             <ModelSelector models={models} current={modelCur} selected={modelSel} onSelect={selectModel} up />
             <ReasoningSelector level={ws.reasoning} onSelect={selectReasoning} />
+            <ModeSelector mode={ws.mode} onSelect={changeMode} />
             {activeSkills.slice(0, 1).map((s) => (
               <Pill key={s} tone="accent" tip={s} onRemove={() => changeSkills(activeSkills.filter((n) => n !== s))}>{s}</Pill>
             ))}
             {activeSkills.length > 1 && <Pill tone="accent" onClick={() => setSkillsOpen(true)} tip={t("skills.manage")}>+{activeSkills.length - 1}</Pill>}
             <span className="flex-1" />
+            <AttachMenu disabled={conn !== "open"} onFile={(f) => void addFile(f)} onLink={addLink} />
             <button
               type="button"
               onClick={() => safeSend({ type: "open_compose", target: "chat", lang })}
@@ -846,6 +1138,16 @@ export default function App() {
           />
         );
       })()}
+      {memoryOpen && (
+        <MemoryModal
+          globalNotes={ws.memory}
+          project={curProject ? { name: curProject.name, notes: curProject.memory } : undefined}
+          onGlobal={(n) => updateWs((w) => ({ ...w, memory: n }))}
+          onProject={(n) => updateWs((w) => ({ ...w, projects: w.projects.map((p) => (p.id === curProjectId ? { ...p, memory: n } : p)) }))}
+          onClose={() => setMemoryOpen(false)}
+        />
+      )}
+      {tplOpen && <TemplatesModal templates={ws.templates} projectId={curProjectId} projectName={curProject?.name} onChange={(tp) => updateWs((w) => ({ ...w, templates: tp }))} onClose={() => setTplOpen(false)} />}
       {skillCreate.open && (
         <SkillCreateModal busy={skillCreate.busy} error={skillCreate.error} onCreate={createSkill} onClose={() => setSkillCreate({ open: false, busy: false, error: null })} />
       )}

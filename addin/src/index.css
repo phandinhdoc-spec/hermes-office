@@ -7,9 +7,10 @@ html, body, #root { height: 100%; margin: 0; }
 /* Scoped reset (Tailwind preflight is disabled) */
 .hx, .hx * { box-sizing: border-box; }
 .hx { font-family: -apple-system, "Segoe UI", "Helvetica Neue", Arial, "Noto Sans", "Times New Roman", sans-serif; font-size: 13px; line-height: 1.6; color: #1f2328; background: #fff; }
-.hx button { font: inherit; color: inherit; background: none; border: 0; padding: 0; margin: 0; cursor: pointer; }
+:where(.hx) *, :where(.hx) ::before, :where(.hx) ::after { border-width: 0; border-style: solid; border-color: currentColor; }
+:where(.hx) button { font: inherit; color: inherit; background: none; border-width: 0; padding: 0; margin: 0; cursor: pointer; }
 .hx button:disabled { cursor: default; }
-.hx input, .hx textarea { font: inherit; color: inherit; background: transparent; border: 0; outline: 0; margin: 0; }
+:where(.hx) :is(input, textarea) { font: inherit; color: inherit; background: transparent; border-width: 0; outline: 0; margin: 0; }
 .hx textarea { resize: vertical; line-height: 1.6; overflow-y: auto; }
 .hx pre { line-height: 1.6; }
 .hx h1, .hx h2, .hx h3, .hx p, .hx pre { margin: 0; }

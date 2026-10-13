@@ -1,4 +1,6 @@
 import { callTool } from "../office/tools";
+import type { Snapshot } from "../office/snapshot";
+import { takeSnapshot } from "../office/snapshot";
 
 export interface HermesStatus {
   installed: boolean;
@@ -31,6 +33,12 @@ export type BridgeEvent =
   | { type: "models"; models: ModelOption[]; current: { model: string | null; provider: string | null }; selected: { model: string | null; provider: string | null } }
   | { type: "skills"; skills: SkillInfo[]; active: string[] }
   | { type: "skills_active"; active: string[] }
+  | { type: "mode"; mode: string }
+  | { type: "approval_request"; id: string; rid: string; calls: { tool: string; args: unknown }[] }
+  | { type: "memory_proposal"; id: string; note: string }
+  | { type: "extracted"; id: string; ok: boolean; name: string; doc_id?: string; chars?: number; chunks?: number; mode?: "inline" | "search"; message?: string }
+  | { type: "attachments"; items: { name: string; doc_id?: string; chars?: number; chunks?: number; mode?: "inline" | "search"; ok: boolean }[] }
+  | { type: "summary"; id: string; purpose: string; text: string; cancelled?: boolean; failed?: boolean }
   | { type: "reasoning"; level: string | null; levels: string[] }
   | { type: "skill_created"; ok: boolean; name: string; message?: string; path?: string }
   | { type: "skill_detail"; skill: SkillDetail | null; name?: string }
@@ -94,9 +102,14 @@ export class BridgeClient {
   private retry = 0;
   private stopped = false;
 
+  /** Snapshots taken for the current chat turns, newest last. */
+  private snapped = new Set<string>();
+
   constructor(
     private onEvent: (e: BridgeEvent) => void,
     private onState: (s: ConnState) => void,
+    /** Called with a fresh snapshot (or null when none could be taken) before the first change of a turn. */
+    private onSnapshot?: (turn: string, snap: Snapshot | null, error?: string) => void,
   ) {}
 
   connect(): void {
@@ -133,6 +146,14 @@ export class BridgeClient {
   private async handle(msg: any): Promise<void> {
     if (msg.type === "rpc_request") {
       try {
+        if (msg.mutating && msg.turn && !this.snapped.has(msg.turn)) {
+          this.snapped.add(msg.turn);
+          try {
+            this.onSnapshot?.(msg.turn, await takeSnapshot(String(msg.tool).replace(/^office_/, "")));
+          } catch (e) {
+            this.onSnapshot?.(msg.turn, null, e instanceof Error ? e.message : String(e));
+          }
+        }
         const result = await callTool(msg.tool, msg.args);
         this.send({ type: "rpc_result", id: msg.id, result });
       } catch (e) {

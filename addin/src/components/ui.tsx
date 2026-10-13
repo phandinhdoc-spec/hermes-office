@@ -31,6 +31,11 @@ export const IconRefresh = svg(<path d="M13 3.5V7H9.5M3 12.5V9h3.5M12.4 6.5A5 5 
 export const IconPlus = svg(<path d="M8 3v10M3 8h10" />);
 export const IconFolder = svg(<path d="M2 4.5a1 1 0 0 1 1-1h3l1.5 1.5H13a1 1 0 0 1 1 1V11.5a1 1 0 0 1-1 1H3a1 1 0 0 1-1-1v-7Z" />);
 export const IconRules = svg(<path d="M4 2.5h6.5L13 5v8.5H4v-11ZM6 7h5M6 9.5h5M6 12h3" />);
+export const IconLink = svg(<path d="M6.5 9.5a2.5 2.5 0 0 0 3.5 0l2.5-2.5a2.5 2.5 0 0 0-3.5-3.5L8 4.5M9.5 6.5a2.5 2.5 0 0 0-3.5 0L3.5 9a2.5 2.5 0 0 0 3.5 3.5L8 11.5" />);
+export const IconUndo = svg(<path d="M5.5 3.5 2.5 6.5l3 3M2.5 6.5H10a3.5 3.5 0 0 1 0 7H6.5" />);
+export const IconMore = svg(<><circle cx="3.5" cy="8" r=".6" fill="currentColor" /><circle cx="8" cy="8" r=".6" fill="currentColor" /><circle cx="12.5" cy="8" r=".6" fill="currentColor" /></>);
+export const IconClip = svg(<path d="M12.5 7.5 8 12a3 3 0 0 1-4.2-4.2l5-5a2 2 0 0 1 2.9 2.8l-5 5a1 1 0 0 1-1.4-1.4L9.5 5" />);
+export const IconBrainNote = svg(<path d="M3 3.5h10v7H8.5L6 13v-2.5H3v-7ZM5.5 6h5M5.5 8h3" />);
 export const IconSearch = svg(<><circle cx="7" cy="7" r="4" /><path d="m10 10 3.5 3.5" /></>);
 
 /** Compact 24px icon button with a hover tooltip. */

@@ -120,6 +120,15 @@ Sau khi plugin được bật, các thao tác sửa nhanh (inline, `F6`) chạy 
 - Ô chọn **🧠** cạnh mô hình đặt mức tư duy (`hermes chat --reasoning`): Mặc định, Tắt, Tối thiểu, Thấp, Vừa, Cao, Rất cao, Tối đa.
 - Nút tròn **ⓘ** nổi ở góc trên bên phải do chính Office vẽ, add-in không tắt được; giao diện chừa sẵn vùng đó.
 
+### 6. Công cụ nâng cao (thanh công cụ trên ô nhập, menu ⋯ và ô chọn chế độ)
+- **Chế độ** (ô ⚡ cạnh 🧠): *Tự động* (áp dụng ngay), *Duyệt trước* (hiện danh sách thay đổi, bấm Áp dụng mới ghi vào tài liệu), *Chỉ hỏi đáp* (Hermes chỉ đọc; bridge từ chối mọi lệnh sửa). Ở chế độ hỏi đáp, Hermes trích dẫn vị trí dạng `[[ref: ...]]` và bạn bấm nút ↗ để nhảy tới đúng chỗ (Word: đoạn văn bản, Excel: ô, PowerPoint: slide).
+- **Hoàn tác** (↶): trước lượt đầu tiên Hermes sửa tài liệu, add-in chụp bản sao (Word/PowerPoint: toàn bộ tệp; Excel: nội dung và định dạng số của ô). Giữ 5 bản gần nhất trong bộ nhớ. Excel không hoàn tác phông, màu, biểu đồ; Word có thể không khôi phục đầu/chân trang và chú thích.
+- **Hermes nhớ gì**: Hermes đề xuất ghi chú bền vững, bạn bấm *Ghi nhớ* thì mới lưu (theo dự án hoặc chung). Xem, thêm, xóa ở ⋯ → *Hermes nhớ gì*.
+- **Mẫu lệnh**: ⋯ → *Mẫu lệnh*. Mẫu hiện thành nút màu tím và trong menu gõ `/`. Biến: `{vùng chọn}` `{ngày}` `{tên file}` `{ứng dụng}`.
+- **Đính kèm** (📎): PDF, DOCX, PPTX, XLSX, TXT, MD, CSV, HTML hoặc liên kết http(s), không giới hạn dung lượng (PDF cần `pdftotext` hoặc `pypdf`). File được tải lên bridge qua HTTP, giữ trong RAM và lưu ở `~/.hermes/office_docs/` (tự xóa sau 30 ngày không dùng). Tài liệu đến 60.000 ký tự được gửi nguyên vẹn (📎); lớn hơn thì chuyển sang chế độ 🔎: prompt chỉ có mục lục ngắn, còn Hermes tự gọi `office_doc_search` (BM25 không phân biệt dấu, hoặc regex), `office_doc_read`, `office_doc_outline`, `office_doc_summarize_part` để chỉ đọc phần cần dùng.
+- **Thước đo ngữ cảnh**: số token ước tính hiện cạnh tên hộp thoại; vượt ngưỡng (ở ⋯, mặc định 40k) sẽ nhắc *Tóm tắt & hộp mới*.
+- **Xuất / tóm tắt**: ⋯ → tải hoặc sao chép hộp thoại dạng Markdown, chèn bản tóm tắt vào tài liệu, hoặc tóm tắt rồi mở hộp thoại mới mang theo bản tóm tắt.
+
 ## 📂 Cấu trúc dự án
 
 ```

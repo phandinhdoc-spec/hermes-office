@@ -17,7 +17,7 @@ export default function TooltipHost() {
       window.clearTimeout(timer.current);
       timer.current = window.setTimeout(() => {
         if (!t.isConnected) return;
-        setTip({ text: t.getAttribute("data-tip") || "", rect: t.getBoundingClientRect(), preferUp: t.hasAttribute("data-tip-up") });
+        setTip({ text: t.getAttribute("data-tip") || "", rect: t.getBoundingClientRect(), preferUp: !t.hasAttribute("data-tip-down") });
       }, 300);
     };
     const out = (e: Event) => { if (find(e.target)) hide(); };
