@@ -113,6 +113,13 @@ Sau khi plugin được bật, các thao tác sửa nhanh (inline, `F6`) chạy 
 - Nhấp vào dòng mô tả chữ mờ của bất kỳ kỹ năng nào để mở hộp thoại giải thích chi tiết mục đích và cách sử dụng.
 
 ---
+### 5. Hộp thoại, dự án, quy tắc và mức độ tư duy
+- Thanh công cụ nằm ngay trên ô nhập: **＋** mở hộp thoại mới (ngữ cảnh trống, giúp giảm cache/chi phí khi chat dài), **thư mục** mở danh sách hội thoại & dự án, **tài liệu** mở *Quy tắc* chung.
+- **Dự án** gom nhiều hội thoại, có quy tắc riêng và nhớ bộ kỹ năng đang bật; quy tắc được chèn vào mọi yêu cầu gửi cho Hermes.
+- Trong bảng Kỹ năng, nút **＋** tạo kỹ năng mới (ghi `~/.hermes/skills/<tên>/SKILL.md`).
+- Ô chọn **🧠** cạnh mô hình đặt mức tư duy (`hermes chat --reasoning`): Mặc định, Tắt, Tối thiểu, Thấp, Vừa, Cao, Rất cao, Tối đa.
+- Nút tròn **ⓘ** nổi ở góc trên bên phải do chính Office vẽ, add-in không tắt được; giao diện chừa sẵn vùng đó.
+
 ## 📂 Cấu trúc dự án
 
 ```

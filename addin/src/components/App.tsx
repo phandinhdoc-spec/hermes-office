@@ -19,10 +19,19 @@ import ImeTextarea, { type ImeTextareaHandle } from "./ImeTextarea";
 import InlineEdit, { type InlineState } from "./InlineEdit";
 import LoginModal, { type AuthProgress } from "./LoginModal";
 import ModelSelector from "./ModelSelector";
+import ReasoningSelector from "./ReasoningSelector";
+import RulesModal from "./RulesModal";
+import SessionsDrawer from "./SessionsDrawer";
+import SkillCreateModal from "./SkillCreateModal";
 import SkillsDrawer from "./SkillsDrawer";
-import ToolsPanel from "./ToolsPanel";
 import {
-  IconButton, IconCheck, IconChevron, IconCopy, IconEdit, IconInsert, IconSelection, IconSend, IconSkills, IconStop, IconTools, IconTrash, IconX, Pill, StatusDot,
+  effectiveRules, loadMsgs, loadWorkspace, newChatMeta, removeMsgs, saveMsgs, saveWorkspace, titleFrom, uid,
+  type Msg, type Project, type Workspace,
+} from "../lib/workspace";
+import ToolsPanel from "./ToolsPanel";
+import TooltipHost from "./TooltipHost";
+import {
+  IconButton, IconCheck, IconChevron, IconCopy, IconEdit, IconFolder, IconInsert, IconPlus, IconRules, IconSelection, IconSend, IconSkills, IconStop, IconTools, IconTrash, IconX, Pill, StatusDot,
 } from "./ui";
 
 /** The CLI's quiet mode appends a `session_id:` footer; never insert that into a document. */
@@ -30,18 +39,6 @@ const clean = (t: string) => t.replace(/\s*session_id: \S+\s*$/, "");
 
 const INLINE_IDLE: InlineState = { open: false, scope: "selection", target: "", output: "", busy: false, error: null };
 type Sel = { model: string | null; provider: string | null };
-
-interface Msg {
-  id: string;
-  role: "user" | "assistant" | "tool";
-  text: string;
-  /** tool steps only */
-  tool?: string;
-  args?: unknown;
-  result?: unknown;
-  ok?: boolean;
-  pending?: boolean;
-}
 
 const CHIPS: { id: "summarize" | "proofread" | "translate" | "table" }[] = [
   { id: "summarize" }, { id: "proofread" }, { id: "translate" }, { id: "table" },
@@ -52,31 +49,6 @@ const ERR_KEYS: Record<string, Key> = {
   "err.invalid_model": "err.invalid_model",
   "err.invalid_skill": "err.invalid_skill",
 };
-
-const HISTORY_KEY = "hermes_office_chat_history";
-const HISTORY_MAX = 300;
-
-/** Load saved messages; anything that was mid-generation is settled so no spinner/cursor is restored. */
-function loadHistory(): Msg[] {
-  try {
-    const raw = JSON.parse(localStorage.getItem(HISTORY_KEY) || "[]");
-    if (!Array.isArray(raw)) return [];
-    return raw
-      .filter((m) => m && typeof m.id === "string" && (m.role === "user" || m.role === "assistant" || m.role === "tool") && typeof m.text === "string")
-      .map((m: Msg) => (m.pending ? { ...m, pending: false, ok: false } : m));
-  } catch {
-    return [];
-  }
-}
-
-function saveHistory(msgs: Msg[]): void {
-  try {
-    if (!msgs.length) localStorage.removeItem(HISTORY_KEY);
-    else localStorage.setItem(HISTORY_KEY, JSON.stringify(msgs.slice(-HISTORY_MAX).map((m) => (m.pending ? { ...m, pending: false, ok: false } : m))));
-  } catch {
-    /* storage unavailable or full in some Office webviews */
-  }
-}
 
 const short = (v: unknown, n = 600) => (typeof v === "string" ? v : JSON.stringify(v, null, 1) ?? "").slice(0, n);
 
@@ -110,7 +82,13 @@ export default function App() {
   const { t, lang, setLang } = useI18n();
   const [conn, setConn] = useState<ConnState>("connecting");
   const [hermes, setHermes] = useState<HermesStatus | null>(null);
-  const [msgs, setMsgs] = useState<Msg[]>(loadHistory);
+  const [ws, setWs] = useState<Workspace>(loadWorkspace);
+  const [msgs, setMsgs] = useState<Msg[]>(() => loadMsgs(ws.activeId));
+  const wsRef = useRef<Workspace>(ws);
+  const activeIdRef = useRef<string>(ws.activeId);
+  const [sessionsOpen, setSessionsOpen] = useState(false);
+  const [rulesModal, setRulesModal] = useState<{ kind: "global" } | { kind: "project"; id: string | "new" } | null>(null);
+  const [skillCreate, setSkillCreate] = useState<{ open: boolean; busy: boolean; error: string | null }>({ open: false, busy: false, error: null });
   // Nội dung ô chat nằm trong DOM (ImeTextarea, uncontrolled) để không làm hỏng bộ gõ tiếng Việt; state chỉ giữ cờ "có chữ".
   const [hasInput, setHasInput] = useState(false);
   const [useSelection, setUseSelection] = useState(true);
@@ -151,11 +129,11 @@ export default function App() {
 
   // Persist the conversation (debounced while streaming; flushed when the taskpane closes).
   useEffect(() => {
-    const id = window.setTimeout(() => saveHistory(msgs), 250);
+    const id = window.setTimeout(() => saveMsgs(activeIdRef.current, msgs), 250);
     return () => window.clearTimeout(id);
   }, [msgs]);
   useEffect(() => {
-    const flush = () => saveHistory(histRef.current);
+    const flush = () => saveMsgs(activeIdRef.current, histRef.current);
     window.addEventListener("pagehide", flush);
     window.addEventListener("beforeunload", flush);
     return () => {
@@ -163,6 +141,20 @@ export default function App() {
       window.removeEventListener("beforeunload", flush);
     };
   }, []);
+
+  /** Single writer for workspace state: the ref is always current, so handlers can chain updates safely. */
+  const updateWs = useCallback((fn: (w: Workspace) => Workspace) => {
+    const next = fn(wsRef.current);
+    wsRef.current = next;
+    setWs(next);
+    saveWorkspace(next);
+  }, []);
+  // Name a chat after its first user message.
+  useEffect(() => {
+    const title = titleFrom(msgs);
+    const cur = wsRef.current.chats.find((c) => c.id === activeIdRef.current);
+    if (title && cur && !cur.title) updateWs((w) => ({ ...w, chats: w.chats.map((c) => (c.id === cur.id ? { ...c, title } : c)) }));
+  }, [msgs, updateWs]);
 
   const applyInline = useCallback(async (text: string) => {
     try {
@@ -227,6 +219,12 @@ export default function App() {
       case "skills_active":
         setActiveSkills(e.active);
         break;
+      case "skill_created":
+        if (e.ok) {
+          setSkillCreate({ open: false, busy: false, error: null });
+          setActiveSkills((a) => (a.includes(e.name) ? a : [...a, e.name]));
+        } else setSkillCreate((c) => ({ ...c, busy: false, error: e.message ?? "error" }));
+        break;
       case "tools_info":
         setOfficeTools(e.office);
         setToolsets(e.hermes);
@@ -271,6 +269,8 @@ export default function App() {
       setConn(s);
       if (s === "open") {
         for (const type of ["list_models", "list_skills", "list_tools", "auth_status"]) c.send({ type });
+        c.send({ type: "set_reasoning", level: wsRef.current.reasoning });
+        c.send({ type: "set_rules", rules: effectiveRules(wsRef.current) });
         // Give a fresh bridge session the restored conversation as context (ignored if it already has history).
         const hist = histRef.current
           .filter((m) => (m.role === "user" || m.role === "assistant") && m.text)
@@ -311,6 +311,7 @@ export default function App() {
       setError(t("err.readSelection", { msg: e instanceof Error ? e.message : String(e) }));
     }
     const id = crypto.randomUUID();
+    updateWs((w) => ({ ...w, chats: w.chats.map((c) => (c.id === w.activeId ? { ...c, updated: Date.now() } : c)) }));
     setMsgs((m) => [...m, { id: id + "-u", role: "user", text }]);
     taRef.current?.setValue("");
     setBusy(id);
@@ -353,7 +354,89 @@ export default function App() {
   const changeSkills = (names: string[]) => {
     setActiveSkills(names);
     safeSend({ type: "set_skills", skills: names });
+    // A project remembers the skills chosen while working in it.
+    const pid = wsRef.current.chats.find((c) => c.id === wsRef.current.activeId)?.projectId;
+    if (pid) updateWs((w) => ({ ...w, projects: w.projects.map((p) => (p.id === pid ? { ...p, skills: names } : p)) }));
   };
+  const createSkill = (name: string, description: string, body: string) => {
+    setSkillCreate({ open: true, busy: true, error: null });
+    safeSend({ type: "create_skill", name, description, body });
+  };
+
+  // ---- chats / projects -------------------------------------------------------------
+  /** Make `id` the active chat: persist the old one, load the new one and give the bridge a clean context for it. */
+  const switchTo = (id: string) => {
+    if (id === activeIdRef.current) return;
+    saveMsgs(activeIdRef.current, histRef.current);
+    const next = loadMsgs(id);
+    activeIdRef.current = id;
+    histRef.current = next;
+    setMsgs(next);
+    updateWs((w) => ({ ...w, activeId: id }));
+    exitSelect();
+    setError(null);
+    safeSend({ type: "reset" });
+    const hist = next.filter((m) => (m.role === "user" || m.role === "assistant") && m.text).map((m) => ({ role: m.role, content: m.text }));
+    if (hist.length) safeSend({ type: "restore_history", messages: hist });
+    const pid = wsRef.current.chats.find((c) => c.id === id)?.projectId;
+    const proj = pid ? wsRef.current.projects.find((p) => p.id === pid) : undefined;
+    if (proj?.skills.length) {
+      setActiveSkills(proj.skills);
+      safeSend({ type: "set_skills", skills: proj.skills });
+    }
+  };
+  const newChat = (projectId: string | null = null) => {
+    if (busy) return;
+    const cur = wsRef.current.chats.find((c) => c.id === activeIdRef.current);
+    if (!histRef.current.length && cur && cur.projectId === projectId) {
+      setSessionsOpen(false);
+      taRef.current?.focus();
+      return;
+    }
+    const meta = newChatMeta(projectId);
+    updateWs((w) => ({ ...w, chats: [...w.chats, meta] }));
+    switchTo(meta.id);
+    setSessionsOpen(false);
+    setTab("chat");
+    setTimeout(() => taRef.current?.focus(), 0);
+  };
+  const deleteChat = (id: string) => {
+    if (id === activeIdRef.current && busy) return;
+    removeMsgs(id);
+    const rest = wsRef.current.chats.filter((c) => c.id !== id);
+    if (id !== activeIdRef.current) {
+      updateWs((w) => ({ ...w, chats: rest }));
+      return;
+    }
+    const fallback = [...rest].sort((a, b) => b.updated - a.updated)[0] ?? newChatMeta();
+    updateWs((w) => ({ ...w, chats: rest.length ? rest : [fallback] }));
+    switchTo(fallback.id);
+  };
+  const deleteProject = (id: string) =>
+    updateWs((w) => ({ ...w, projects: w.projects.filter((p) => p.id !== id), chats: w.chats.map((c) => (c.projectId === id ? { ...c, projectId: null } : c)) }));
+  const saveRules = (name: string, rules: string) => {
+    const m = rulesModal;
+    setRulesModal(null);
+    if (!m) return;
+    if (m.kind === "global") {
+      updateWs((w) => ({ ...w, globalRules: rules }));
+    } else if (m.id === "new") {
+      const proj: Project = { id: uid(), name, rules, skills: [] };
+      updateWs((w) => ({ ...w, projects: [...w.projects, proj] }));
+      newChat(proj.id);
+    } else {
+      updateWs((w) => ({ ...w, projects: w.projects.map((p) => (p.id === m.id ? { ...p, name, rules } : p)) }));
+    }
+  };
+  const selectReasoning = (level: string | null) => {
+    updateWs((w) => ({ ...w, reasoning: level }));
+    safeSend({ type: "set_reasoning", level });
+  };
+  const rulesStr = effectiveRules(ws);
+  useEffect(() => {
+    if (conn === "open") safeSend({ type: "set_rules", rules: rulesStr });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [conn, rulesStr]);
   const runOffice = (tool: string, args: object) => safeSend({ type: "run_tool", id: crypto.randomUUID(), tool, args });
   const runToolset = (toolset: string, text: string) => {
     if (busy) return;
@@ -407,7 +490,7 @@ export default function App() {
       /* bridge offline: still clear locally */
     }
     setMsgs([]);
-    saveHistory([]);
+    saveMsgs(activeIdRef.current, []);
     setConfirmClear(false);
     exitSelect();
   };
@@ -421,7 +504,7 @@ export default function App() {
     const next = histRef.current.filter((_, i) => !idx.has(i));
     histRef.current = next;
     setMsgs(next);
-    saveHistory(next);
+    saveMsgs(activeIdRef.current, next);
     setSelected(new Set());
     if (!next.length) setSelectMode(false);
   };
@@ -450,8 +533,9 @@ export default function App() {
 
   return (
     <div className="hx relative flex h-full flex-col overflow-hidden">
-      {/* Header: one 32px row (pr-8 to prevent collision with Office taskpane overlay controls) */}
-      <header className="flex h-8 shrink-0 items-center gap-1 border-b border-gray-500/20 px-2 pr-9">
+      {/* Header: status + language only. The right 68px is kept clear because Office draws its own floating
+          button over the top-right corner of the taskpane (it cannot be hidden from an add-in). */}
+      <header className="flex h-8 shrink-0 items-center gap-1 border-b border-gray-500/20 px-2 pr-[68px]">
         <span data-tip={t("header.bridge", { state: t(`conn.${conn}`) }) + (hermes ? t(hermes.installed ? "header.hermesOk" : "header.hermesMissing") : "")} data-tip-left="" className="flex items-center gap-1.5">
           <StatusDot tone={hermes && !hermes.installed ? "bad" : connTone} pulse={conn === "connecting"} />
           <strong className="text-[12px] font-semibold">Hermes</strong>
@@ -475,11 +559,6 @@ export default function App() {
             <span key={l} className={"px-1.5 py-1 " + (lang === l ? "rounded-md bg-indigo-600 text-white" : "text-gray-500")}>{l === "vi" ? "Viet" : "Eng"}</span>
           ))}
         </button>
-        <IconButton tip={t("header.inline", { key: shortcutLabel })} onClick={() => void openInline()}><IconEdit /></IconButton>
-        <IconButton tip={activeSkills.length ? t("header.skillsActive", { n: activeSkills.length }) : t("header.skills")} onClick={() => setSkillsOpen(true)} active={activeSkills.length > 0}><IconSkills /></IconButton>
-        <IconButton tip={t("header.tools")} onClick={() => setTab(chat ? "tools" : "chat")} active={!chat}><IconTools /></IconButton>
-        <IconButton tip={selectMode ? t("history.exitSelectMode") : t("history.selectMode")} onClick={() => (selectMode ? exitSelect() : setSelectMode(true))} disabled={!msgs.length} active={selectMode}><IconCheck /></IconButton>
-        <IconButton tip={t("history.clearAll")} onClick={() => setConfirmClear(true)} disabled={!msgs.length} danger><IconTrash /></IconButton>
       </header>
 
       {(conn === "closed" || (hermes && !hermes.installed) || needAuth || error) && (
@@ -593,6 +672,25 @@ export default function App() {
         </div>
       )}
 
+
+      {/* Toolbar: sessions, rules, inline edit, skills, tools, selection mode */}
+      <div className="flex shrink-0 items-center gap-0.5 border-t border-gray-500/20 px-1.5 py-1">
+        <IconButton tip={t("tb.new")} onClick={() => newChat(wsRef.current.chats.find((c) => c.id === ws.activeId)?.projectId ?? null)} disabled={!!busy}><IconPlus /></IconButton>
+        <IconButton tip={t("tb.chats")} onClick={() => setSessionsOpen(true)} active={sessionsOpen}><IconFolder /></IconButton>
+        <IconButton tip={t("tb.rules")} onClick={() => setRulesModal({ kind: "global" })} active={!!ws.globalRules.trim()}><IconRules /></IconButton>
+        <span className="mx-1 h-4 w-px bg-gray-500/25" aria-hidden />
+        <IconButton tip={t("header.inline", { key: shortcutLabel })} onClick={() => void openInline()}><IconEdit /></IconButton>
+        <IconButton tip={activeSkills.length ? t("header.skillsActive", { n: activeSkills.length }) : t("header.skills")} onClick={() => setSkillsOpen(true)} active={activeSkills.length > 0}><IconSkills /></IconButton>
+        <IconButton tip={t("header.tools")} onClick={() => setTab(chat ? "tools" : "chat")} active={!chat}><IconTools /></IconButton>
+        <span className="min-w-0 flex-1 truncate px-1.5 text-center text-[10.5px] text-gray-500">{(() => {
+          const c = ws.chats.find((x) => x.id === ws.activeId);
+          const pr = c?.projectId ? ws.projects.find((x) => x.id === c.projectId) : undefined;
+          return (pr ? pr.name + " › " : "") + (c?.title || t("chats.untitled"));
+        })()}</span>
+        <IconButton tip={selectMode ? t("history.exitSelectMode") : t("history.selectMode")} onClick={() => (selectMode ? exitSelect() : setSelectMode(true))} disabled={!msgs.length} active={selectMode}><IconCheck /></IconButton>
+        <IconButton tip={t("history.clearAll")} onClick={() => setConfirmClear(true)} disabled={!msgs.length} danger><IconTrash /></IconButton>
+      </div>
+
       {/* Composer */}
       <div className={"shrink-0 space-y-1.5 px-2 pb-2 pt-1 " + (chat ? "" : "hidden")}>
         {status && (
@@ -636,12 +734,13 @@ export default function App() {
               }
             }}
           />
-          <div className="flex items-center gap-1 px-1.5 pb-1.5">
+          <div className="flex flex-wrap items-center gap-1 px-1.5 pb-1.5">
             <ModelSelector models={models} current={modelCur} selected={modelSel} onSelect={selectModel} up />
-            {activeSkills.slice(0, 2).map((s) => (
+            <ReasoningSelector level={ws.reasoning} onSelect={selectReasoning} />
+            {activeSkills.slice(0, 1).map((s) => (
               <Pill key={s} tone="accent" tip={s} onRemove={() => changeSkills(activeSkills.filter((n) => n !== s))}>{s}</Pill>
             ))}
-            {activeSkills.length > 2 && <Pill tone="accent" onClick={() => setSkillsOpen(true)} tip={t("skills.manage")}>+{activeSkills.length - 2}</Pill>}
+            {activeSkills.length > 1 && <Pill tone="accent" onClick={() => setSkillsOpen(true)} tip={t("skills.manage")}>+{activeSkills.length - 1}</Pill>}
             <span className="flex-1" />
             <button
               type="button"
@@ -676,6 +775,7 @@ export default function App() {
         </div>
       </div>
 
+      <TooltipHost />
       {confirmClear && (
         <div
           className="absolute inset-0 z-40 flex items-center justify-center bg-black/40 p-4"
@@ -711,8 +811,44 @@ export default function App() {
         active={activeSkills}
         onChange={changeSkills}
         onRefresh={() => safeSend({ type: "list_skills" })}
+        onCreate={() => setSkillCreate({ open: true, busy: false, error: null })}
         onClose={() => setSkillsOpen(false)}
       />
+      {sessionsOpen && (
+        <SessionsDrawer
+          chats={ws.chats}
+          projects={ws.projects}
+          activeId={ws.activeId}
+          busy={!!busy}
+          onSelect={(id) => { switchTo(id); setSessionsOpen(false); setTab("chat"); }}
+          onNew={newChat}
+          onRename={(id, title) => updateWs((w) => ({ ...w, chats: w.chats.map((c) => (c.id === id ? { ...c, title } : c)) }))}
+          onDelete={deleteChat}
+          onNewProject={() => setRulesModal({ kind: "project", id: "new" })}
+          onEditProject={(id) => setRulesModal({ kind: "project", id })}
+          onDeleteProject={deleteProject}
+          onClose={() => setSessionsOpen(false)}
+        />
+      )}
+      {rulesModal && (() => {
+        const proj = rulesModal.kind === "project" && rulesModal.id !== "new" ? ws.projects.find((p) => p.id === rulesModal.id) : undefined;
+        if (rulesModal.kind === "project" && rulesModal.id !== "new" && !proj) return null;
+        return rulesModal.kind === "global" ? (
+          <RulesModal title={t("rules.globalTitle")} hint={t("rules.globalHint")} rules={ws.globalRules} onSave={saveRules} onClose={() => setRulesModal(null)} />
+        ) : (
+          <RulesModal
+            title={proj ? t("rules.projectTitle") + ": " + proj.name : t("rules.newProjectTitle")}
+            hint={t("rules.projectHint")}
+            name={proj?.name ?? ""}
+            rules={proj?.rules ?? ""}
+            onSave={saveRules}
+            onClose={() => setRulesModal(null)}
+          />
+        );
+      })()}
+      {skillCreate.open && (
+        <SkillCreateModal busy={skillCreate.busy} error={skillCreate.error} onCreate={createSkill} onClose={() => setSkillCreate({ open: false, busy: false, error: null })} />
+      )}
       <InlineEdit
         state={inline}
         incoming={composeIn}

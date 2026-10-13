@@ -31,6 +31,8 @@ export type BridgeEvent =
   | { type: "models"; models: ModelOption[]; current: { model: string | null; provider: string | null }; selected: { model: string | null; provider: string | null } }
   | { type: "skills"; skills: SkillInfo[]; active: string[] }
   | { type: "skills_active"; active: string[] }
+  | { type: "reasoning"; level: string | null; levels: string[] }
+  | { type: "skill_created"; ok: boolean; name: string; message?: string; path?: string }
   | { type: "skill_detail"; skill: SkillDetail | null; name?: string }
   | { type: "tools_info"; office: OfficeToolInfo[]; hermes: ToolsetInfo[] }
   | { type: "done"; id: string; cancelled?: boolean }

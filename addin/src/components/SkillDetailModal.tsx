@@ -118,7 +118,7 @@ export default function SkillDetailModal({ name, detail, active, onToggle, onClo
 
   return (
     <div className="absolute inset-0 z-30 flex flex-col bg-white animate-pop dark:bg-[#14161a]" role="dialog" aria-modal="true" aria-label={name}>
-      <div className="flex items-start gap-1.5 border-b border-gray-500/20 px-2 pr-9 py-1.5">
+      <div className="flex items-start gap-1.5 border-b border-gray-500/20 px-2 pr-[68px] py-1.5">
         <div className="min-w-0 flex-1">
           <strong className="block truncate text-[13px]">{name}</strong>
           {detail?.category && <span className="rounded-full bg-gray-500/10 px-1.5 text-[10px] text-gray-500">{detail.category}</span>}

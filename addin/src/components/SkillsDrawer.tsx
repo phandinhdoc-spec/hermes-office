@@ -2,7 +2,7 @@ import { useMemo, useState } from "react";
 import type { SkillDetail, SkillInfo } from "../lib/bridge";
 import { useI18n } from "../lib/i18n";
 import SkillDetailModal from "./SkillDetailModal";
-import { IconButton, IconRefresh, IconSearch, IconX, btnGhost } from "./ui";
+import { IconButton, IconPlus, IconRefresh, IconSearch, IconX, btnGhost } from "./ui";
 
 interface Props {
   open: boolean;
@@ -10,6 +10,7 @@ interface Props {
   active: string[];
   onChange: (active: string[]) => void;
   onRefresh: () => void;
+  onCreate: () => void;
   onClose: () => void;
   /** undefined = loading, null = SKILL.md not found */
   details: Record<string, SkillDetail | null>;
@@ -17,7 +18,7 @@ interface Props {
 }
 
 /** Slide-over list of installed Hermes skills; ticked skills are preloaded (`-s`) for every request. */
-export default function SkillsDrawer({ open, skills, active, onChange, onRefresh, onClose, details, onRequestDetail }: Props) {
+export default function SkillsDrawer({ open, skills, active, onChange, onRefresh, onCreate, onClose, details, onRequestDetail }: Props) {
   const { t, lang } = useI18n();
   const [detailName, setDetailName] = useState<string | null>(null);
   const [q, setQ] = useState("");
@@ -39,10 +40,11 @@ export default function SkillsDrawer({ open, skills, active, onChange, onRefresh
       aria-label={t("skillsDrawer.title")}
       onKeyDown={(e) => e.key === "Escape" && !detailName && onClose()}
     >
-      <div className="flex items-center gap-1 border-b border-gray-500/20 px-2 pr-9 py-1.5">
+      <div className="flex items-center gap-1 border-b border-gray-500/20 px-2 pr-[68px] py-1.5">
         <strong className="flex-1 text-[12px]">
           {t("skillsDrawer.title")} <span className="font-normal text-gray-500">· {t("skillsDrawer.active", { n: active.length })}</span>
         </strong>
+        <IconButton tip={t("skillNew.tooltip")} onClick={onCreate}><IconPlus /></IconButton>
         <IconButton tip={t("common.refresh")} onClick={onRefresh}><IconRefresh /></IconButton>
         <IconButton tip={t("common.close")} onClick={onClose}><IconX /></IconButton>
       </div>

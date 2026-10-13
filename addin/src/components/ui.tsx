@@ -28,6 +28,9 @@ export const IconCopy = svg(<><rect x="5.5" y="5.5" width="7" height="8" rx="1.5
 export const IconSpark = svg(<path d="M8 2v3.5M8 10.5V14M2 8h3.5M10.5 8H14M4 4l2 2M10 10l2 2M12 4l-2 2M6 10l-2 2" />);
 export const IconSelection = svg(<path d="M2.5 5V3.5a1 1 0 0 1 1-1H5M11 2.5h1.5a1 1 0 0 1 1 1V5M13.5 11v1.5a1 1 0 0 1-1 1H11M5 13.5H3.5a1 1 0 0 1-1-1V11" />);
 export const IconRefresh = svg(<path d="M13 3.5V7H9.5M3 12.5V9h3.5M12.4 6.5A5 5 0 0 0 3.6 5.2M3.6 9.5a5 5 0 0 0 8.8 1.3" />);
+export const IconPlus = svg(<path d="M8 3v10M3 8h10" />);
+export const IconFolder = svg(<path d="M2 4.5a1 1 0 0 1 1-1h3l1.5 1.5H13a1 1 0 0 1 1 1V11.5a1 1 0 0 1-1 1H3a1 1 0 0 1-1-1v-7Z" />);
+export const IconRules = svg(<path d="M4 2.5h6.5L13 5v8.5H4v-11ZM6 7h5M6 9.5h5M6 12h3" />);
 export const IconSearch = svg(<><circle cx="7" cy="7" r="4" /><path d="m10 10 3.5 3.5" /></>);
 
 /** Compact 24px icon button with a hover tooltip. */

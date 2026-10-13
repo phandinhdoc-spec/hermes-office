@@ -46,6 +46,7 @@ from __future__ import annotations
 import argparse
 import asyncio
 import codecs
+import colorsys
 import json
 import logging
 import os
@@ -103,18 +104,23 @@ TOOLS: Dict[str, Dict[str, Any]] = {
     "office_word_get_styles": {"host": "word", "args": {"which": "selection|document (default selection)"}},
     "office_word_apply_format": {"host": "word", "args": {"which": "selection|document (default selection)", "fontName": "string", "fontSize": "number", "bold": "bool", "italic": "bool", "color": "#RRGGBB", "alignment": "Left|Centered|Right|Justified", "lineSpacing": "points", "spaceBefore": "points", "spaceAfter": "points", "firstLineIndent": "points", "leftIndent": "points (all optional)"}},
     "office_excel_get_format": {"host": "excel", "args": {"address": "A1:C1 (optional, default selection)"}},
+    "office_word_get_page_setup": {"host": "word", "args": {}},
+    "office_word_set_page_setup": {"host": "word", "args": {"topMargin": "points", "bottomMargin": "points", "leftMargin": "points", "rightMargin": "points", "orientation": "Portrait|Landscape", "paperSize": "e.g. A4, Letter, Legal, A5, Executive", "headerDistance": "points", "footerDistance": "points", "verticalAlignment": "Top|Center|Justify|Bottom (all optional)"}},
+    "office_word_apply_style": {"host": "word", "args": {"style": "e.g. Heading 1, Title, Subtitle, Quote, Intense Quote, Normal, No Spacing, Caption, Table Grid; or a custom/localized style name", "which": "selection|document (default selection)"}},
     "office_excel_set_format": {"host": "excel", "args": {"address": "A1:C1 (optional)", "fontName": "string", "fontSize": "number", "bold": "bool", "italic": "bool", "fontColor": "#RRGGBB", "fillColor": "#RRGGBB", "numberFormat": "e.g. #,##0.00", "horizontalAlignment": "Left|Center|Right", "verticalAlignment": "Top|Center|Bottom", "wrapText": "bool", "columnWidth": "number (all optional)"}},
     "office_excel_create_table": {"host": "excel", "args": {"address": "string (optional, e.g. A1:E20)", "name": "string (optional)", "hasHeaders": "bool (optional, default true)"}},
     "office_excel_list_tables": {"host": "excel", "args": {}},
     "office_excel_add_table_column": {"host": "excel", "args": {"tableName": "string", "columnName": "string", "formula": "string (optional, e.g. =[@[Price]]*[@[Qty]])"}},
     "office_excel_insert_chart": {"host": "excel", "args": {"dataAddress": "string (e.g. A1:D10)", "chartType": "ColumnClustered|Line|Pie|BarClustered (default ColumnClustered)", "title": "string (optional)", "targetCell": "string (optional, e.g. F2)"}},
     "office_excel_conditional_format": {"host": "excel", "args": {"address": "string (optional)", "ruleType": "colorScale|preset|cellValue", "criteria": "string (optional, e.g. duplicateValues or number threshold)", "fillColor": "#RRGGBB (optional)", "fontColor": "#RRGGBB (optional)"}},
+    "office_excel_design_table": {"host": "excel", "args": {"address": "A1:E20 (optional, default selection; first row is treated as the header)", "header": "bool (default true)", "headerFill": "#RRGGBB (default #1F4E78)", "headerFontColor": "#RRGGBB (default #FFFFFF)", "banded": "bool (default true)", "bandFill": "#RRGGBB (default #F2F6FA)", "borders": "bool (default true)", "borderColor": "#RRGGBB (default #BFBFBF)", "autoFit": "bool (default true)"}},
     "office_excel_sort_filter": {"host": "excel", "args": {"address": "string (optional)", "sortColumn": "number (0-indexed)", "ascending": "bool (default true)", "filterColumn": "number (0-indexed, optional)", "filterCriteria": "string (optional)"}},
     "office_excel_list_sheets": {"host": "excel", "args": {}},
     "office_excel_add_sheet": {"host": "excel", "args": {"name": "string (optional)"}},
     "office_ppt_get_theme": {"host": "powerpoint", "args": {"slideIndex": "number (optional, default selected slide)"}},
     "office_ppt_format_shape": {"host": "powerpoint", "args": {"slideIndex": "number", "shapeId": "string", "fontName": "string", "fontSize": "number", "bold": "bool", "italic": "bool", "fontColor": "#RRGGBB", "fillColor": "#RRGGBB (optional)"}},
     "office_ppt_apply_format": {"host": "powerpoint", "args": {"scope": "selection|slide|presentation (default presentation)", "slideIndex": "number (optional)", "fontName": "string", "fontSize": "number", "bold": "bool", "italic": "bool", "fontColor": "#RRGGBB", "fillColor": "#RRGGBB (all optional)"}},
+    "office_ppt_apply_palette": {"host": "powerpoint", "args": {"scope": "selection|slide|presentation (default presentation)", "slideIndex": "number (optional, used with scope=slide)", "titleColor": "#RRGGBB (biggest text of each slide)", "bodyColor": "#RRGGBB (remaining text)", "accentColor": "#RRGGBB (shapes without text)", "backgroundColor": "#RRGGBB (slide background, all optional)"}},
     "office_ppt_generate_slide": {"host": "powerpoint", "args": {"title": "string", "subtitle": "string (optional)", "bullets": "string[] (optional)", "layoutId": "string (optional)"}},
     "office_ppt_get_slides": {"host": "powerpoint", "args": {}},
     "office_ppt_add_slide": {"host": "powerpoint", "args": {"layoutId": "string (optional)"}},
@@ -128,6 +134,21 @@ TOOLS: Dict[str, Dict[str, Any]] = {
 LOCAL_TOOLS: Dict[str, Dict[str, Any]] = {
     "office_style_get_profile": {"host": "bridge", "args": {}},
     "office_style_save_profile": {"host": "bridge", "args": {"profile": "object, deep-merged into the saved profile, e.g. {\"word\": {\"font\": {\"name\": \"Times New Roman\", \"size\": 13}}}"}},
+    "office_design_palette": {
+        "host": "bridge",
+        "args": {
+            "seed": "#RRGGBB anchor color (optional; when given it drives the hue)",
+            "mood": "balanced|vibrant|pastel|muted|warm|cool|mono|high-contrast (default balanced)",
+            "dark": "bool (default false, dark surface palette)",
+        },
+    },
+    "office_design_font_pair": {
+        "host": "bridge",
+        "args": {
+            "vibe": "modern|classic|editorial|technical|friendly (optional, default all)",
+            "platform": "any|mac|windows (default any: fonts that ship with Office everywhere)",
+        },
+    },
 }
 TOOLS.update(LOCAL_TOOLS)
 
@@ -406,12 +427,18 @@ Available tools:
 """
 
 
-def build_prompt(host: str, history: List[Dict[str, str]], context: Optional[str]) -> str:
+REASONING_LEVELS = ("none", "minimal", "low", "medium", "high", "xhigh", "max", "ultra")  # `hermes chat --reasoning`
+RULES_MAX = 8000
+
+
+def build_prompt(host: str, history: List[Dict[str, str]], context: Optional[str], rules: str = "") -> str:
     app = {"word": "Word", "excel": "Excel", "powerpoint": "PowerPoint"}.get(host, "Office")
     tools = "\n".join(
         f"- {name}({json.dumps(spec['args'])})" for name, spec in TOOLS.items() if spec["host"] in (host, "bridge") or host not in ("word", "excel", "powerpoint")
     )
     parts = [SYSTEM_PREAMBLE.format(app=app, tools=tools), style_prompt_section(host)]
+    if rules.strip():
+        parts.append("User rules (always follow these, they override defaults):\n" + rules.strip()[:RULES_MAX] + "\n")
     if context:
         parts.append(f"Current Office context:\n{context}\n")
     parts.append("Conversation:")
@@ -428,6 +455,7 @@ async def run_hermes(
     provider: Optional[str] = None,
     skills: Optional[List[str]] = None,
     toolsets: Optional[str] = None,
+    reasoning: Optional[str] = None,
 ) -> str:
     """Run `hermes chat` one-shot with the prompt from a file; stream stdout to on_chunk."""
     path = find_hermes()
@@ -445,6 +473,8 @@ async def run_hermes(
         cmd += ["-s", ",".join(skills)]
     if toolsets:
         cmd += ["-t", toolsets]
+    if reasoning in REASONING_LEVELS:
+        cmd += ["--reasoning", reasoning]
     proc = await asyncio.create_subprocess_exec(
         *cmd,
         stdin=asyncio.subprocess.DEVNULL,
@@ -624,6 +654,22 @@ def parse_frontmatter(text: str) -> "tuple[Dict[str, Any], str]":
             if sep and k.strip() and not line.startswith((" ", "\t")):
                 meta[k.strip()] = v.strip().strip("\"'")
     return meta, body
+
+
+def create_skill(name: str, description: str, body: str) -> Path:
+    """Write ~/.hermes/skills/<name>/SKILL.md; refuses to overwrite so a typo cannot clobber an existing skill."""
+    if not SKILL_NAME_RE.match(name) or name.lower() in ("con", "nul", "aux", "prn"):
+        raise ValueError("invalid skill name (use letters, digits, '-', '_', '.')")
+    if find_skill_file(name):
+        raise ValueError(f"skill '{name}' already exists")
+    desc = " ".join(description.split())[:300]
+    if not desc or not body.strip():
+        raise ValueError("description and instructions are required")
+    path = hermes_home() / "skills" / name / "SKILL.md"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    text = f"---\nname: {name}\ndescription: {json.dumps(desc, ensure_ascii=False)}\n---\n\n{body.strip()[:20000]}\n"
+    path.write_text(text, encoding="utf-8")
+    return path
 
 
 def find_skill_file(name: str) -> Optional[Path]:
@@ -848,6 +894,166 @@ def style_prompt_section(host: str) -> str:
     return f"{STYLE_INSTRUCTIONS}\n\nSaved style profile ({style_profile_path()}):\n{body}\n"
 
 
+# --------------------------------------------------------------------------- designer tools
+
+MOODS: Dict[str, Dict[str, float]] = {
+    "balanced": {"hue": 215.0, "sat": 0.55, "accentShift": 35.0, "accentSat": 0.65, "textL": 0.14},
+    "vibrant": {"hue": 268.0, "sat": 0.80, "accentShift": 55.0, "accentSat": 0.90, "textL": 0.12},
+    "pastel": {"hue": 200.0, "sat": 0.45, "accentShift": 40.0, "accentSat": 0.55, "textL": 0.24},
+    "muted": {"hue": 212.0, "sat": 0.22, "accentShift": 30.0, "accentSat": 0.30, "textL": 0.18},
+    "warm": {"hue": 28.0, "sat": 0.65, "accentShift": 30.0, "accentSat": 0.75, "textL": 0.16},
+    "cool": {"hue": 205.0, "sat": 0.60, "accentShift": -40.0, "accentSat": 0.70, "textL": 0.13},
+    "mono": {"hue": 220.0, "sat": 0.06, "accentShift": 0.0, "accentSat": 0.10, "textL": 0.12},
+    "high-contrast": {"hue": 0.0, "sat": 0.90, "accentShift": 180.0, "accentSat": 0.90, "textL": 0.06},
+}
+
+PALETTE_ROLES = {
+    "primary": "headings, links, key numbers, header fills",
+    "accent": "callouts, chart series, highlights",
+    "background": "page or slide background",
+    "surface": "table bands, cards, alternating rows",
+    "text": "body copy",
+    "muted": "captions and secondary labels",
+    "border": "table grid and dividers",
+}
+
+_HEX_RE = re.compile(r"^#?([0-9a-fA-F]{6}|[0-9a-fA-F]{3})$")
+
+
+def hex_to_hsl(color: str) -> tuple[float, float, float]:
+    m = _HEX_RE.match(str(color).strip())
+    if not m:
+        raise ValueError(f"expected a #RRGGBB color, got {color!r}")
+    h = m.group(1)
+    if len(h) == 3:
+        h = "".join(c * 2 for c in h)
+    r, g, b = (int(h[i : i + 2], 16) / 255 for i in (0, 2, 4))
+    hi, lo = max(r, g, b), min(r, g, b)
+    lightness = (hi + lo) / 2
+    if hi == lo:
+        return 0.0, 0.0, lightness
+    d = hi - lo
+    sat = d / (2 - hi - lo) if lightness > 0.5 else d / (hi + lo)
+    if hi == r:
+        hue = ((g - b) / d) % 6
+    elif hi == g:
+        hue = (b - r) / d + 2
+    else:
+        hue = (r - g) / d + 4
+    return hue * 60, sat, lightness
+
+
+def hsl_to_hex(hue: float, sat: float, lightness: float) -> str:
+    r, g, b = colorsys.hls_to_rgb((hue % 360) / 360, min(max(lightness, 0.0), 1.0), min(max(sat, 0.0), 1.0))
+    return "#{:02X}{:02X}{:02X}".format(*(round(c * 255) for c in (r, g, b)))
+
+
+def _luminance(color: str) -> float:
+    r, g, b = (int(color[i : i + 2], 16) / 255 for i in (1, 3, 5))
+
+    def lin(c: float) -> float:
+        return c / 12.92 if c <= 0.03928 else ((c + 0.055) / 1.055) ** 2.4
+
+    return 0.2126 * lin(r) + 0.7152 * lin(g) + 0.0722 * lin(b)
+
+
+def contrast(fg: str, bg: str) -> Dict[str, Any]:
+    """WCAG contrast of `fg` over `bg`; aa needs 4.5, aaa needs 7.0, large text needs 3.0."""
+    la, lb = _luminance(fg), _luminance(bg)
+    ratio = round((max(la, lb) + 0.05) / (min(la, lb) + 0.05), 2)
+    return {"ratio": ratio, "aa": ratio >= 4.5, "aaa": ratio >= 7.0, "aaLarge": ratio >= 3.0}
+
+
+def build_palette(seed: Optional[str], mood: str, dark: bool) -> Dict[str, Any]:
+    key = str(mood or "balanced").strip().lower()
+    if key not in MOODS:
+        raise ValueError(f"unknown mood {mood!r}; use one of {', '.join(MOODS)}")
+    m = MOODS[key]
+    hue, sat = m["hue"], m["sat"]
+    if seed:
+        hue, seed_sat, _ = hex_to_hsl(seed)
+        sat = max(sat, min(seed_sat, 0.9))
+    colors = {
+        "primary": hsl_to_hex(hue, sat, 0.58 if dark else 0.42),
+        "accent": hsl_to_hex(hue + m["accentShift"], m["accentSat"], 0.62 if dark else 0.50),
+        "background": hsl_to_hex(hue, min(sat, 0.10), 0.09 if dark else 0.98),
+        "surface": hsl_to_hex(hue, min(sat, 0.08), 0.15 if dark else 0.94),
+        "text": hsl_to_hex(hue, min(sat, 0.25), 0.94 if dark else m["textL"]),
+        "muted": hsl_to_hex(hue, min(sat, 0.15), 0.68 if dark else 0.45),
+        "border": hsl_to_hex(hue, min(sat, 0.18), 0.30 if dark else 0.82),
+    }
+    return {
+        "mood": key,
+        "dark": dark,
+        "seed": seed or None,
+        "colors": colors,
+        "roles": PALETTE_ROLES,
+        "contrast": {
+            "textOnBackground": contrast(colors["text"], colors["background"]),
+            "textOnSurface": contrast(colors["text"], colors["surface"]),
+            "whiteOnPrimary": contrast("#FFFFFF", colors["primary"]),
+        },
+    }
+
+
+FONT_PAIRS: List[Dict[str, str]] = [
+    {"vibe": "modern", "platform": "any", "heading": "Calibri", "body": "Corbel",
+     "note": "Humanist sans on both levels; light and screen-friendly for reports and decks."},
+    {"vibe": "modern", "platform": "any", "heading": "Arial Black", "body": "Arial",
+     "note": "Punchy poster contrast; use Arial Black only for short headings."},
+    {"vibe": "modern", "platform": "windows", "heading": "Segoe UI", "body": "Verdana",
+     "note": "Clean UI feel; Verdana keeps body copy readable at small sizes."},
+    {"vibe": "classic", "platform": "any", "heading": "Cambria", "body": "Calibri",
+     "note": "Serif over sans: the default Office pairing, safe for formal documents."},
+    {"vibe": "classic", "platform": "any", "heading": "Palatino Linotype", "body": "Constantia",
+     "note": "Book-style serif pairing with generous x-height; good for long reading."},
+    {"vibe": "editorial", "platform": "any", "heading": "Georgia", "body": "Verdana",
+     "note": "Editorial serif heading with a wide, screen-legible body."},
+    {"vibe": "editorial", "platform": "any", "heading": "Garamond", "body": "Calibri",
+     "note": "Traditional typeface heading, modern body; set Garamond a few points larger."},
+    {"vibe": "technical", "platform": "any", "heading": "Rockwell", "body": "Corbel",
+     "note": "Slab-serif heading reads engineered; pair with a neutral body."},
+    {"vibe": "technical", "platform": "any", "heading": "Tahoma", "body": "Verdana",
+     "note": "Compact neutral sans for specs, tables and data-dense pages."},
+    {"vibe": "technical", "platform": "windows", "heading": "Consolas", "body": "Segoe UI",
+     "note": "Monospace heading for code or spec documents."},
+    {"vibe": "friendly", "platform": "any", "heading": "Trebuchet MS", "body": "Verdana",
+     "note": "Slightly informal heading with a very legible body."},
+    {"vibe": "friendly", "platform": "any", "heading": "Century Gothic", "body": "Trebuchet MS",
+     "note": "Geometric, open heading; keep body size up because Century Gothic runs small."},
+    {"vibe": "friendly", "platform": "mac", "heading": "Avenir Next", "body": "Georgia",
+     "note": "macOS-only geometric sans heading over a warm serif body."},
+    {"vibe": "editorial", "platform": "mac", "heading": "Helvetica Neue", "body": "Georgia",
+     "note": "macOS-only neutral grotesque heading over an editorial serif body."},
+]
+
+VIBES = sorted({p["vibe"] for p in FONT_PAIRS})
+PLATFORMS = ("any", "mac", "windows")
+
+
+def font_pairs(vibe: Optional[str], platform: str) -> Dict[str, Any]:
+    plat = str(platform or "any").strip().lower()
+    if plat not in PLATFORMS:
+        raise ValueError(f"unknown platform {platform!r}; use one of {', '.join(PLATFORMS)}")
+    wanted = str(vibe or "").strip().lower()
+    if wanted and wanted not in VIBES:
+        raise ValueError(f"unknown vibe {vibe!r}; use one of {', '.join(VIBES)}")
+    found = [
+        p
+        for p in FONT_PAIRS
+        if (not wanted or p["vibe"] == wanted)
+        and (p["platform"] == "any" or (plat != "any" and p["platform"] == plat))
+    ]
+    if not found:
+        raise ValueError(f"no font pair for vibe={vibe!r} platform={platform!r}")
+    return {
+        "vibe": wanted or "any",
+        "platform": plat,
+        "pairs": found,
+        "applyWith": "office_word_apply_format / office_excel_set_format / office_ppt_apply_format",
+    }
+
+
 # --------------------------------------------------------------------------- sessions / RPC
 
 
@@ -871,6 +1077,8 @@ class Session:
         self.model: Optional[str] = None
         self.provider: Optional[str] = None
         self.skills: List[str] = []
+        self.reasoning: Optional[str] = None  # None = Hermes default (agent.reasoning_effort)
+        self.rules: str = ""
 
     async def send(self, msg: Dict[str, Any]) -> None:
         async with self.send_lock:
@@ -883,6 +1091,10 @@ class Session:
             return load_style_profile()
         if tool == "office_style_save_profile":
             return save_style_profile(args.get("profile") or {})
+        if tool == "office_design_palette":
+            return build_palette(args.get("seed"), str(args.get("mood") or "balanced"), bool(args.get("dark")))
+        if tool == "office_design_font_pair":
+            return font_pairs(args.get("vibe"), str(args.get("platform") or "any"))
         rid = uuid.uuid4().hex
         fut: "asyncio.Future[Any]" = asyncio.get_running_loop().create_future()
         self.pending[rid] = fut
@@ -923,8 +1135,8 @@ async def handle_chat(sess: Session, msg: Dict[str, Any]) -> None:
                 await sess.send({"type": "delta", "id": cid, "text": t})
 
             reply = await run_hermes(
-                build_prompt(host, sess.history, context), on_chunk,
-                skills=sess.skills, **route_model(sess),
+                build_prompt(host, sess.history, context, sess.rules), on_chunk,
+                skills=sess.skills, reasoning=sess.reasoning, **route_model(sess),
             )
             sess.history.append({"role": "assistant", "content": reply})
             blocks = TOOL_BLOCK_RE.findall(reply)
@@ -1015,7 +1227,7 @@ async def handle_run_toolset(sess: Session, msg: Dict[str, Any]) -> None:
     try:
         if not NAME_RE.match(toolset):
             raise ValueError(f"invalid toolset: {toolset!r}")
-        await run_hermes(str(msg.get("text", "")), on_chunk, skills=sess.skills, toolsets=toolset,
+        await run_hermes(str(msg.get("text", "")), on_chunk, skills=sess.skills, toolsets=toolset, reasoning=sess.reasoning,
                          **route_model(sess))
         await sess.send({"type": "done", "id": cid})
     except asyncio.CancelledError:
@@ -1241,6 +1453,22 @@ async def ws_endpoint(ws: WebSocket) -> None:
                     await sess.send({"type": "skills_active", "active": names})
                 else:
                     await sess.send({"type": "error", "message": "invalid skill name", "code": "invalid_skill"})
+            elif kind == "set_reasoning":
+                lvl = msg.get("level") or None
+                if lvl is not None and lvl not in REASONING_LEVELS:
+                    await sess.send({"type": "error", "message": f"invalid reasoning level: {lvl}"})
+                else:
+                    sess.reasoning = lvl
+                    await sess.send({"type": "reasoning", "level": lvl, "levels": list(REASONING_LEVELS)})
+            elif kind == "set_rules":
+                sess.rules = str(msg.get("rules") or "")[:RULES_MAX]
+            elif kind == "create_skill":
+                try:
+                    path = create_skill(str(msg.get("name", "")).strip(), str(msg.get("description", "")), str(msg.get("body", "")))
+                    await sess.send({"type": "skill_created", "ok": True, "name": str(msg.get("name", "")).strip(), "path": str(path)})
+                    await sess.send({"type": "skills", "skills": await list_skills(), "active": sess.skills})
+                except Exception as exc:  # noqa: BLE001
+                    await sess.send({"type": "skill_created", "ok": False, "name": str(msg.get("name", "")), "message": str(exc)})
             elif kind == "list_tools":
                 await sess.send({"type": "tools_info", **await tools_info()})
             elif kind in ("inline", "run_tool", "run_toolset"):
