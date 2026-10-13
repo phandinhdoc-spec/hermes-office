@@ -34,7 +34,8 @@ import AttachMenu from "./AttachMenu";
 import MemoryModal from "./MemoryModal";
 import ModeSelector from "./ModeSelector";
 import MoreMenu from "./MoreMenu";
-import RichText from "./RichText";
+import { AssistantText, hasPartialMachine, stripMachine } from "./Markdown";
+import { toolLabel } from "../lib/toolLabels";
 import TemplatesModal from "./TemplatesModal";
 import { gotoRef } from "../office/goto";
 import type { Snapshot } from "../office/snapshot";
@@ -47,7 +48,7 @@ import {
 /** What the bridge needs to find an attachment again; legacy entries keep their text so the bridge can adopt them. */
 const attRef = (a: Attachment) => (a.doc_id ? { name: a.name, doc_id: a.doc_id } : { name: a.name, text: a.text });
 
-const clean = (t: string) => t.replace(/\s*session_id: \S+\s*$/, "").replace(/```office-memory[\s\S]*?```/g, "");
+const clean = (t: string) => stripMachine(t).replace(/\s*session_id: \S+\s*$/, "").trim();
 
 const INLINE_IDLE: InlineState = { open: false, scope: "selection", target: "", output: "", busy: false, error: null };
 type Sel = { model: string | null; provider: string | null };
@@ -68,25 +69,47 @@ const ERR_KEYS: Record<string, Key> = {
 
 const short = (v: unknown, n = 600) => (typeof v === "string" ? v : JSON.stringify(v, null, 1) ?? "").slice(0, n);
 
-function ToolStep({ m }: { m: Msg }) {
-  const { t } = useI18n();
-  const [open, setOpen] = useState(false);
-  const tone = m.pending ? "text-indigo-500" : m.ok ? "text-emerald-500" : "text-red-500";
+/** Hermes' avatar: the "who is speaking" cue of a chat app. */
+function Avatar() {
+  return <span aria-hidden className="mt-0.5 inline-flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-gradient-to-br from-indigo-500 to-violet-500 text-[10px] font-bold text-white">H</span>;
+}
+
+/** "Hermes is typing": three bouncing dots, optionally with what it is doing. */
+function Typing({ avatar, label }: { avatar: boolean; label?: string }) {
   return (
-    <div className="animate-pop rounded-lg border border-gray-500/20 bg-gray-500/[0.04]">
-      <button type="button" onClick={() => setOpen((o) => !o)} className="flex w-full items-center gap-1.5 px-2 py-1 text-left" aria-expanded={open}>
+    <div className="flex items-center gap-1.5" role="status" aria-live="polite">
+      {avatar ? <Avatar /> : <span className="w-5 shrink-0" />}
+      <span className="inline-flex items-center gap-1 rounded-2xl rounded-tl-sm bg-gray-500/10 px-2.5 py-2">
+        {[0, 1, 2].map((k) => <span key={k} className="h-1.5 w-1.5 animate-dot rounded-full bg-gray-500" style={{ animationDelay: `${k * 0.18}s` }} />)}
+      </span>
+      {label && <span className="shimmer-text text-[11px]">{label}</span>}
+    </div>
+  );
+}
+
+/** One step Hermes takes in the document, written like a sentence ("Formatting the text…" → "Formatted the text"). Details fold away. */
+function ToolStep({ m }: { m: Msg }) {
+  const { t, lang } = useI18n();
+  const [open, setOpen] = useState(false);
+  const phase = m.pending ? "run" : m.ok ? "done" : "fail";
+  return (
+    <div className="animate-pop ml-[26px]">
+      <button type="button" onClick={() => setOpen((o) => !o)} aria-expanded={open} className="inline-flex max-w-full items-center gap-1.5 rounded-full px-2 py-0.5 text-left text-[11.5px] hover:bg-gray-500/10">
+        {phase === "run" ? (
+          <span className="h-3 w-3 shrink-0 animate-spin rounded-full border-2 border-indigo-500/30 border-t-indigo-500" />
+        ) : (
+          <span className={"shrink-0 text-[11px] " + (phase === "done" ? "text-emerald-500" : "text-red-500")}>{phase === "done" ? "✓" : "✗"}</span>
+        )}
+        <span className={"min-w-0 truncate " + (phase === "run" ? "shimmer-text" : phase === "fail" ? "text-red-600 dark:text-red-400" : "text-gray-500")}>{toolLabel(m.tool, lang, phase)}</span>
         <IconChevron className={"h-2.5 w-2.5 shrink-0 text-gray-400 transition-transform " + (open ? "rotate-90" : "")} />
-        {m.pending ? <StatusDot tone="accent" pulse /> : <span className={"text-[11px] " + tone}>{m.ok ? "✓" : "✗"}</span>}
-        <code className="min-w-0 flex-1 truncate text-[11px] text-gray-600 dark:text-gray-300">{m.tool?.replace(/^office_/, "")}</code>
-        <span className={"text-[10px] " + (m.pending ? "shimmer-text" : "text-gray-400")}>{m.pending ? t("tool.running") : m.ok ? t("tool.done") : t("tool.failed")}</span>
       </button>
+      {phase === "fail" && m.result !== undefined && !open && <div className="ml-6 break-words text-[11px] text-red-600/90 dark:text-red-400/90">{short(m.result, 160)}</div>}
       {open && (
-        <div className="space-y-1 border-t border-gray-500/15 px-2 py-1.5">
+        <div className="ml-4 mt-0.5 space-y-1 rounded-lg border border-gray-500/15 bg-gray-500/[0.04] px-2 py-1.5">
+          <div className="text-[10px] uppercase tracking-wider text-gray-400">{t("tool.details")} · <code className="normal-case">{m.tool?.replace(/^office_/, "")}</code></div>
           <pre className="max-h-24 overflow-auto whitespace-pre-wrap break-all text-[10.5px] text-gray-500">{short(m.args, 800)}</pre>
           {m.result !== undefined && (
-            <pre className={"max-h-32 overflow-auto whitespace-pre-wrap break-all text-[10.5px] " + (m.ok ? "text-gray-600 dark:text-gray-300" : "text-red-600")}>
-              {short(m.result)}
-            </pre>
+            <pre className={"max-h-32 overflow-auto whitespace-pre-wrap break-all text-[10.5px] " + (m.ok ? "text-gray-600 dark:text-gray-300" : "text-red-600")}>{short(m.result)}</pre>
           )}
         </div>
       )}
@@ -823,8 +846,12 @@ export default function App() {
         {msgs.map((m, i) => {
           const live = !!busy && i === last;
           const sel = selected.has(i);
+          const prev = msgs[i - 1];
+          const hermesPrev = !!prev && prev.role !== "user";
+          const vis = m.role === "assistant" ? stripMachine(m.text).trim() : "";
+          if (m.role === "assistant" && !vis && !live) return null; // a reply that was only a tool call has nothing to show
           return (
-            <div key={i} className="group flex items-start gap-1.5">
+            <div key={i} className={"group flex items-start gap-1.5 " + (m.role === "tool" && hermesPrev ? "-mt-1" : "")}>
               {selectMode && (
                 <input
                   type="checkbox"
@@ -842,21 +869,25 @@ export default function App() {
                 {m.role === "tool" ? (
                   <ToolStep m={m} />
                 ) : m.role === "user" ? (
-                  <div className="ml-8 animate-pop whitespace-pre-wrap break-words rounded-xl rounded-br-sm bg-indigo-600 px-2.5 py-1.5 text-[13px] text-white">
+                  <div className="ml-8 animate-pop whitespace-pre-wrap break-words rounded-2xl rounded-br-md bg-indigo-600 px-3 py-1.5 text-[13px] text-white">
                     {m.text}
                   </div>
+                ) : !vis ? (
+                  <Typing avatar={!hermesPrev} label={hasPartialMachine(m.text) ? t("typing.action") : undefined} />
                 ) : (
-                  <div className="animate-pop">
-                    <div className="whitespace-pre-wrap break-words rounded-xl rounded-bl-sm border border-gray-500/20 bg-gray-500/[0.06] px-2.5 py-1.5 text-[13px]">
-                      <RichText text={m.text} onRef={jump} />
-                      {live && <span className="ml-0.5 inline-block h-3 w-[2px] animate-pulse bg-indigo-500 align-middle" />}
-                    </div>
-                    {!live && !selectMode && (
-                      <div className="mt-0.5 flex gap-0.5 opacity-0 transition-opacity group-hover:opacity-100 focus-within:opacity-100">
-                        <IconButton tip={t("msg.insert")} onClick={() => void insertMsg(m)} tipLeft><IconInsert /></IconButton>
-                        <IconButton tip={t("msg.copy")} onClick={() => void navigator.clipboard?.writeText(clean(m.text).trim())} tipLeft><IconCopy /></IconButton>
+                  <div className="flex items-start gap-1.5">
+                    {hermesPrev ? <span className="w-5 shrink-0" /> : <Avatar />}
+                    <div className="min-w-0 flex-1 animate-pop">
+                      <div className="rounded-2xl rounded-tl-sm bg-gray-500/10 px-3 py-1.5 text-[13px] leading-[1.6]">
+                        <AssistantText text={vis} animate={live} caret={live} onRef={jump} />
                       </div>
-                    )}
+                      {!live && !selectMode && (
+                        <div className="mt-0.5 flex gap-0.5 opacity-0 transition-opacity group-hover:opacity-100 focus-within:opacity-100">
+                          <IconButton tip={t("msg.insert")} onClick={() => void insertMsg(m)} tipLeft><IconInsert /></IconButton>
+                          <IconButton tip={t("msg.copy")} onClick={() => void navigator.clipboard?.writeText(clean(m.text))} tipLeft><IconCopy /></IconButton>
+                        </div>
+                      )}
+                    </div>
                   </div>
                 )}
               </div>
@@ -868,9 +899,7 @@ export default function App() {
             </div>
           );
         })}
-        {busy && !streaming && !toolRunning && (
-          <div className="flex items-center gap-1.5 px-1 text-[11px]"><StatusDot tone="accent" pulse /><span className="shimmer-text">{t("status.thinkingShort")}</span></div>
-        )}
+        {busy && !streaming && !toolRunning && <Typing avatar={!lastMsg || lastMsg.role === "user"} label={t("typing.think")} />}
         <div ref={endRef} />
       </div>
 
