@@ -54,6 +54,8 @@ const ROWS: [string, string, string, string, string][] = [
   ["ppt_move_shape", "dời khối nội dung", "Moving a shape", "Moved a shape", "move a shape"],
   ["ppt_resize_shape", "đổi kích thước khối", "Resizing a shape", "Resized a shape", "resize a shape"],
   ["ppt_delete_shape", "xóa khối nội dung", "Deleting a shape", "Deleted a shape", "delete a shape"],
+  ["ppt_set_shape_text", "sửa chữ trong khối", "Editing shape text", "Edited shape text", "edit shape text"],
+  ["ppt_delete_slide", "xóa slide", "Deleting a slide", "Deleted a slide", "delete a slide"],
   ["ppt_reorder_slide", "đổi thứ tự slide", "Reordering a slide", "Reordered a slide", "reorder a slide"],
   ["ppt_set_alt_text", "ghi mô tả cho ảnh", "Writing alt text", "Wrote alt text", "write alt text"],
   ["ppt_get_lint", "kiểm tra lỗi trình bày slide", "Checking the slides for problems", "Checked the slides for problems", "check the slides for problems"],

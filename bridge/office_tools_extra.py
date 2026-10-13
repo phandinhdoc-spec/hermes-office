@@ -39,6 +39,9 @@ EXTRA_TOOLS: Dict[str, Dict[str, Any]] = {
     "office_ppt_resize_shape": {"host": "powerpoint", "args": {
         "slideIndex": "number", "shapeId": "string", "width": "pt", "height": "pt", "left": "pt (optional)", "top": "pt (optional)"}},
     "office_ppt_delete_shape": {"host": "powerpoint", "args": {"slideIndex": "number", "shapeId": "string"}},
+    "office_ppt_set_shape_text": {"host": "powerpoint", "args": {
+        "slideIndex": "number", "shapeId": "string (from office_ppt_list_shapes)", "text": "new text; keeps the shape's font, size and colour; use \\n between lines"}},
+    "office_ppt_delete_slide": {"host": "powerpoint", "args": {"slideIndex": "0-based index of the slide to delete"}},
     "office_ppt_reorder_slide": {"host": "powerpoint", "args": {"from": "0-based index", "to": "0-based index"}},
     "office_ppt_set_alt_text": {"host": "powerpoint", "args": {"slideIndex": "number", "shapeId": "string", "text": "alt text"}},
     "office_ppt_get_lint": {"host": "powerpoint", "args": {

@@ -397,6 +397,28 @@ export async function setAltText(a: Args): Promise<unknown> {
   });
 }
 
+export async function setShapeText(a: Args): Promise<unknown> {
+  requireHost("powerpoint");
+  if (typeof a.text !== "string") throw new Error("Thiếu text");
+  return PowerPoint.run(async (ctx) => {
+    const s = await shapeOf(ctx, a);
+    s.textFrame.textRange.text = a.text; // font, size and colour of the first run are kept by PowerPoint
+    await ctx.sync();
+    return { ok: true };
+  });
+}
+
+export async function deleteSlide(a: Args): Promise<unknown> {
+  requireHost("powerpoint");
+  if (a.slideIndex === undefined || a.slideIndex === null || a.slideIndex === "") throw new Error("Cần slideIndex rõ ràng (không xóa slide đang chọn theo mặc định)");
+  return PowerPoint.run(async (ctx) => {
+    const { slide, index } = await pickSlide(ctx, a.slideIndex);
+    slide.delete();
+    await ctx.sync();
+    return { ok: true, deleted: index };
+  });
+}
+
 export async function reorderSlide(a: Args): Promise<unknown> {
   requireHost("powerpoint");
   return PowerPoint.run(async (ctx) => {
@@ -421,6 +443,8 @@ export const pptExtraTools: Record<string, (a: Args) => Promise<unknown>> = {
   office_ppt_move_shape: moveShape,
   office_ppt_resize_shape: resizeShape,
   office_ppt_delete_shape: deleteShape,
+  office_ppt_set_shape_text: setShapeText,
+  office_ppt_delete_slide: deleteSlide,
   office_ppt_reorder_slide: reorderSlide,
   office_ppt_set_alt_text: setAltText,
   office_ppt_get_lint: getLint,
