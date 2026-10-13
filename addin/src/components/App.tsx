@@ -13,6 +13,7 @@ import {
 } from "../lib/bridge";
 import { useI18n, type Key } from "../lib/i18n";
 import { currentHost } from "../office/host";
+import { officePromptsFor, skillGroup } from "../lib/officePrompts";
 import { applyInlineEdit, getInlineTarget, getSelectionText, replaceSelectionText, type InlineTarget } from "../office/tools";
 import { isImeKey, shortcutLabel, useInlineShortcut } from "../hooks/useInlineShortcut";
 import ImeTextarea, { type ImeTextareaHandle } from "./ImeTextarea";
@@ -275,6 +276,9 @@ export default function App() {
       }
       case "skills_active":
         setActiveSkills(e.active);
+        break;
+      case "skills_auto":
+        setNotice(tRef.current("skills.auto", { names: e.skills.join(", ") }));
         break;
       case "skill_created":
         if (e.ok) {
@@ -559,11 +563,12 @@ export default function App() {
   const skillScore = (n: string) => (ws.skillUse[n] ?? 0) * 10 + (ws.createdSkills.includes(n) ? 5 : 0) + (activeSkills.includes(n) ? 1 : 0);
   const skillList = quick?.kind !== "skill" ? [] : skills
     .filter((x) => x.enabled && (!lc || (x.name + " " + (lang === "vi" ? x.description_vi : x.description_en)).toLowerCase().includes(lc)))
-    .sort((a, b) => Number(b.name.toLowerCase().startsWith(lc)) - Number(a.name.toLowerCase().startsWith(lc)) || skillScore(b.name) - skillScore(a.name) || a.name.localeCompare(b.name))
+    .sort((a, b) => Number(b.name.toLowerCase().startsWith(lc)) - Number(a.name.toLowerCase().startsWith(lc)) || skillGroup(a.name, currentHost()) - skillGroup(b.name, currentHost()) || skillScore(b.name) - skillScore(a.name) || a.name.localeCompare(b.name))
     .slice(0, 40);
   // `@` prompt library: yours first, then the built-in quick actions
   const promptList = quick?.kind !== "prompt" ? [] : [
     ...userTemplates.map((x) => ({ key: x.id, name: x.name, prompt: x.prompt, builtin: false })),
+    ...officePromptsFor(currentHost(), lang === "vi" ? "vi" : "en").map((x) => ({ key: x.id, name: x.name, prompt: x.prompt, builtin: true })),
     ...CHIPS.map((c) => ({ key: c.id, name: t(`chip.${c.id}`), prompt: t(`chip.${c.id}.prompt`), builtin: true })),
   ].filter((x) => !lc || (x.name + " " + x.prompt).toLowerCase().includes(lc));
   const quickItems: QuickItem[] =

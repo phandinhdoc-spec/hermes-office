@@ -33,6 +33,7 @@ export type BridgeEvent =
   | { type: "models"; models: ModelOption[]; current: { model: string | null; provider: string | null }; selected: { model: string | null; provider: string | null } }
   | { type: "skills"; skills: SkillInfo[]; active: string[] }
   | { type: "skills_active"; active: string[] }
+  | { type: "skills_auto"; id: string; skills: string[] }
   | { type: "mode"; mode: string }
   | { type: "approval_request"; id: string; rid: string; calls: { tool: string; args: unknown }[] }
   | { type: "memory_proposal"; id: string; note: string }

@@ -6,6 +6,7 @@
 #   ./install.sh sideload    copy manifest.xml into the Word/Excel/PowerPoint wef folders (macOS)
 #   ./install.sh uninstall   remove the service and the sideloaded manifests (keeps certs)
 #   ./install.sh status      show what is installed
+#   ./install.sh skills      copy the Office skills (skills/*, marked origin: hermes-office) to ~/.hermes/skills
 #   ./install.sh plugin      enable the Hermes plugin antigravity-subscription-directsdk (agy installed + signed in first)
 #   ./install.sh start       run bridge + Vite dev server together (development)
 #
@@ -243,6 +244,19 @@ do_deps() {
     if [ "$py" = "py -3" ]; then py -3 -m venv "$ROOT/bridge/.venv"; else "$py" -m venv "$ROOT/bridge/.venv"; fi || die "could not create the virtualenv with: $py"
   fi
   "$VENV_PIP" install -q -r "$ROOT/bridge/requirements.txt"
+  do_skills
+}
+
+# Copy the Office skills into ~/.hermes/skills. Only skills marked `origin: hermes-office` are touched; a skill of
+# the same name that the user wrote or edited without that mark is never overwritten. Safe to run again.
+do_skills() {
+  [ -d "$ROOT/skills" ] || return 0
+  say "$(tr_ 'Cai bo skill Office vao ~/.hermes/skills' 'Installing the Office skills into ~/.hermes/skills')"
+  if [ -x "$VENV_PY" ] || [ -f "$VENV_PY" ]; then
+    "$VENV_PY" "$ROOT/bridge/hermes_office_bridge.py" --sync-skills || warn "$(tr_ 'Khong cai duoc skill; cau noi se thu lai khi khoi dong.' 'Could not install the skills; the bridge retries when it starts.')"
+  else
+    warn "$(tr_ 'Chua co moi truong Python cua cau noi; chay ./install.sh truoc.' 'The bridge Python environment is missing; run ./install.sh first.')"
+  fi
 }
 
 # A usable Python 3.9+. Tries python3, python and the Windows launcher; the version check also rejects the
@@ -436,6 +450,7 @@ case "$CMD" in
   sideload)  do_sideload ;;
   uninstall) service_uninstall; do_uninstall ;;
   status)    do_status ;;
+  skills)    do_skills ;;
   plugin)    enable_plugin ;;
   start)     do_start ;;
   service-install)   service_install ;;
