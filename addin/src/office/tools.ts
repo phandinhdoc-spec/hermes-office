@@ -11,6 +11,7 @@ const ok = async <T,>(p: Promise<T>) => (await p) ?? { ok: true };
 
 /** Tool names match SPEC.md and the bridge's TOOLS table. */
 export const tools: Record<string, Handler> = {
+  ...extraTools, // skill-set tools (extra.ts); first on purpose: the entries below win on a name clash
   office_word_get_selection: () => word.getSelection(),
   office_word_get_full_text: () => word.getRange("whole"),
   office_word_replace_selection: (a) => ok(word.replaceSelection(String(a.text ?? ""))),
@@ -44,8 +45,6 @@ export const tools: Record<string, Handler> = {
   office_ppt_get_theme: (a) => ppt.getTheme(a.slideIndex),
   office_ppt_format_shape: (a) => ok(ppt.formatShape(Number(a.slideIndex ?? 0), String(a.shapeId), a)),
   office_ppt_apply_format: (a) => ppt.applyFormat(a),
-
-  ...extraTools, // skill-set tools: ppt_extra.ts, word_extra.ts, excel_extra.ts
 };
 
 export async function callTool(name: string, args: Args = {}): Promise<unknown> {
