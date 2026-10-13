@@ -41,14 +41,17 @@ Công cụ ghi **MỚI** là công cụ thêm trong đợt này. Công cụ đ�
 ## Thay đổi so với bảng khởi điểm
 
 - Tên công cụ đọc đổi cho đúng quy tắc: `office_ppt_lint` → `office_ppt_get_lint` (tương tự Word, Excel).
-- Công cụ **bổ sung** ngoài mục 4 của brief, vì skill không làm được nếu thiếu: `office_ppt_build_slide`, `office_ppt_set_alt_text`, `office_word_get_outline`, `office_word_apply_style_by_index`, `office_word_set_paragraph_text`, `office_word_format_table`, `office_word_get_lint`, `office_excel_clean_range`, `office_excel_get_diff`, `office_excel_highlight_cells`, `office_calc_split_points`, `office_calc_balanced_groups`.
+- Công cụ **bổ sung** ngoài mục 4 của brief, vì skill không làm được nếu thiếu: `office_ppt_build_slide`, `office_ppt_set_alt_text`, `office_ppt_set_shape_text`, `office_ppt_delete_slide`, `office_word_get_outline`, `office_word_apply_style_by_index`, `office_word_set_paragraph_text`, `office_word_format_table`, `office_word_get_lint`, `office_excel_clean_range`, `office_excel_get_diff`, `office_excel_highlight_cells`, `office_calc_split_points`, `office_calc_balanced_groups`.
 - Không thêm skill ngoài 29 skill này. Không bỏ skill nào.
 
 ## Công cụ mới theo nơi chạy
 
 | Nơi chạy | Công cụ |
 |---|---|
-| Cầu nối (Python) | `office_web_search`, `office_web_fetch_image`, `office_calc_split_points`, `office_calc_balanced_groups` |
-| PowerPoint (taskpane) | `office_ppt_build_slide`, `office_ppt_insert_image`, `office_ppt_set_background`, `office_ppt_set_notes`, `office_ppt_list_shapes`, `office_ppt_move_shape`, `office_ppt_resize_shape`, `office_ppt_delete_shape`, `office_ppt_reorder_slide`, `office_ppt_set_alt_text`, `office_ppt_get_lint` |
+| Cầu nối (Python) | `office_web_search`, `office_web_fetch_image`, `office_web_fetch_text`, `office_calc_split_points`, `office_calc_balanced_groups` |
+| PowerPoint (taskpane) | `office_ppt_build_slide`, `office_ppt_insert_image`, `office_ppt_set_background`, `office_ppt_set_notes`, `office_ppt_list_shapes`, `office_ppt_move_shape`, `office_ppt_resize_shape`, `office_ppt_delete_shape`, `office_ppt_reorder_slide`, `office_ppt_set_alt_text`, `office_ppt_set_shape_text`, `office_ppt_delete_slide`, `office_ppt_get_lint` |
 | Word (taskpane) | `office_word_insert_image`, `office_word_set_header_footer`, `office_word_insert_toc`, `office_word_add_comment`, `office_word_find_replace`, `office_word_set_numbering`, `office_word_get_outline`, `office_word_apply_style_by_index`, `office_word_set_paragraph_text`, `office_word_format_table`, `office_word_get_lint` |
 | Excel (taskpane) | `office_excel_set_validation`, `office_excel_freeze_panes`, `office_excel_remove_duplicates`, `office_excel_find_replace`, `office_excel_clean_range`, `office_excel_get_lint`, `office_excel_get_diff`, `office_excel_highlight_cells` |
+
+## Công cụ dự phòng (D-012)
+Cầu nối khai báo nhưng `tools.ts` của nhánh không có; `compat_extra.ts` bổ sung: `office_word_get_page_setup`, `office_word_set_page_setup`, `office_word_apply_style`, `office_excel_design_table`, `office_ppt_apply_palette`.

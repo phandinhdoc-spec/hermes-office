@@ -129,6 +129,65 @@ Sau khi plugin được bật, các thao tác sửa nhanh (inline, `F6`) chạy 
 - **Thước đo ngữ cảnh**: số token ước tính hiện cạnh tên hộp thoại; vượt ngưỡng (ở ⋯, mặc định 40k) sẽ nhắc *Tóm tắt & hộp mới*.
 - **Xuất / tóm tắt**: ⋯ → tải hoặc sao chép hộp thoại dạng Markdown, chèn bản tóm tắt vào tài liệu, hoặc tóm tắt rồi mở hộp thoại mới mang theo bản tóm tắt.
 
+### 7. Bộ skill Office (tự động hóa việc lớn)
+Chỉ cần nói việc cần làm bằng lời thường, Hermes tự chọn skill phù hợp, tự chạy các bước rồi báo cáo ngắn (tối đa 5 dòng: đã làm gì, đã quyết định gì, cách hoàn tác). Mỗi skill hỏi lại **nhiều nhất một câu**, và chỉ khi thiếu thông tin quyết định.
+
+**PowerPoint** (9)
+
+| Skill | Ví dụ câu lệnh |
+|---|---|
+| `ppt-ad-deck` | Làm bài quảng cáo sản phẩm sữa chua X |
+| `ppt-deck-from-brief` | Tạo file trình chiếu Coca-Cola |
+| `ppt-doc-to-slides` | Biến file Word đính kèm thành slide |
+| `ppt-image-sourcing` | Thêm ảnh phù hợp cho các slide |
+| `ppt-lesson-deck` | Soạn slide bài Quang hợp lớp 7 |
+| `ppt-lint-fix` | Kiểm tra và sửa lỗi trình bày bộ slide |
+| `ppt-quiz-game` | Tạo trò chơi ôn tập chủ đề Hóa học 8 |
+| `ppt-restyle` | Làm đẹp bộ slide này, tông xanh |
+| `ppt-speaker-notes` | Viết lời thuyết trình 10 phút |
+
+**Word** (9)
+
+| Skill | Ví dụ câu lệnh |
+|---|---|
+| `word-exam-builder` | Soạn đề kiểm tra Toán 8, 45 phút |
+| `word-format-vn-admin` | Chuẩn hóa văn bản này theo thể thức hành chính |
+| `word-letter-forms` | Soạn đơn xin nghỉ học / biên bản họp |
+| `word-proofread-vn` | Soát lỗi chính tả, dấu câu |
+| `word-report-from-brief` | Viết báo cáo về biến đổi khí hậu 5 trang |
+| `word-structure-fix` | Chuẩn hóa tiêu đề và tạo mục lục |
+| `word-summarize-doc` | Tóm tắt tài liệu này 1 trang |
+| `word-table-from-text` | Biến đoạn này thành bảng |
+| `word-translate-keep-format` | Dịch sang tiếng Anh giữ nguyên định dạng |
+
+**Excel** (8)
+
+| Skill | Ví dụ câu lệnh |
+|---|---|
+| `excel-budget-planner` | Lập bảng chi tiêu tháng 11 |
+| `excel-clean-data` | Làm sạch bảng này |
+| `excel-compare-sheets` | So sánh hai bảng này |
+| `excel-dashboard` | Làm trang tổng quan từ dữ liệu này |
+| `excel-data-from-doc` | Lấy bảng trong file PDF đính kèm vào Excel |
+| `excel-formula-doctor` | Sửa lỗi công thức ở ô F12 |
+| `excel-grade-sheet` | Lập bảng điểm lớp 8A và chia 6 nhóm đều điểm |
+| `excel-schedule-builder` | Lập thời khóa biểu / lịch trực |
+
+**Dùng chung** (3)
+
+| Skill | Ví dụ câu lệnh |
+|---|---|
+| `office-plan-first` | (tự kích hoạt khi việc lớn) |
+| `office-qa-checklist` | Kiểm tra chất lượng tài liệu |
+| `office-quick-actions` | Tóm tắt / viết lại / dịch đoạn đang chọn |
+
+- **Cách dùng:** gõ yêu cầu như ở cột bên phải; hoặc gõ `/` để chọn skill (skill của ứng dụng đang mở hiện đầu danh sách); hoặc gõ `@` để lấy prompt mẫu có ô `[ ]` (Tab nhảy giữa các ô). Khi cầu nối tự thêm skill cho yêu cầu của bạn, đầu khung chat có thông báo "Đang dùng kỹ năng …". Tắt việc tự chọn bằng biến môi trường `HERMES_OFFICE_AUTOSKILL=0`.
+- **Cài đặt:** skill nằm ở thư mục `skills/` và được chép vào `~/.hermes/skills/` khi cài (`./install.sh`, hoặc riêng `./install.sh skills`) và mỗi lần cầu nối khởi động. Chỉ skill có dòng `origin: hermes-office` được cập nhật; skill cùng tên do bạn tự viết sẽ **không bị ghi đè**.
+- **Công cụ mới** (tên bắt đầu `office_`): dựng slide (`office_ppt_build_slide`), chèn ảnh, đổi nền, ghi chú thuyết trình, kiểm lỗi trình bày (`office_ppt_get_lint`, `office_word_get_lint`, `office_excel_get_lint`), mục lục, bình luận, tìm–thay, làm sạch dữ liệu, so sánh hai bảng, cố định hàng tiêu đề, quy tắc nhập liệu…; cùng `office_web_search`, `office_web_fetch_image`, `office_web_fetch_text` (tìm web/ảnh) và `office_calc_split_points`, `office_calc_balanced_groups` (tính điểm, chia nhóm). Công cụ chỉ đọc có `_get_` hoặc `_list_` trong tên nên vẫn chạy được ở chế độ *Duyệt trước* và *Chỉ hỏi đáp*.
+- **An toàn:** tìm web chỉ gửi **từ khóa chủ đề**, không gửi chữ trong tài liệu của bạn; chữ lấy từ web hoặc tài liệu chỉ là dữ liệu, mọi câu "ra lệnh" nằm trong đó bị bỏ qua; ảnh ưu tiên giấy phép mở và được ghi nguồn (ghi chú slide / chú thích ảnh); logo, ảnh sản phẩm của hãng chỉ là ảnh minh họa; không ghi đè cả tài liệu, luôn có nút Hoàn tác.
+- **Giới hạn đã biết:** PowerPoint chưa cho tiện ích ghi vào ngăn *Ghi chú* nên lời thuyết trình được lưu trong khung "Hermes-GhiChu" nằm dưới slide (không hiện khi chiếu); không làm được hoạt ảnh và hiệu ứng chuyển slide; ảnh được đặt vừa khung giữ nguyên tỉ lệ, không cắt xén. Chi tiết: `docs/office-skills/BLOCKERS.md`.
+- **Tài liệu kỹ thuật:** `docs/office-skills/` (khảo sát, danh mục, quyết định, vướng mắc, tiến độ và danh sách việc cần thử trong Office thật).
+
 ## 📂 Cấu trúc dự án
 
 ```
@@ -136,12 +195,14 @@ hermes-office/
 ├── manifest.xml          # Khai báo Office Web Add-in cho Word, Excel, PowerPoint
 ├── install.sh / install.command / install.bat / install.ps1   # Script tự động cài đặt, sinh SSL, sideload và cấu hình daemon
 ├── bridge/                # Backend daemon FastAPI + WebSocket bridge
-│   └── hermes_office_bridge.py
+│   ├── hermes_office_bridge.py
+│   └── office_web.py / office_calc.py / office_skills.py / office_tools_extra.py   # web+ảnh, tính điểm, định tuyến & cài skill, khai báo công cụ mới
 ├── addin/                 # Frontend Task Pane (React + TypeScript + Tailwind CSS)
 │   ├── src/components/   # Các component giao diện: App, ModelSelector, SkillsDrawer, InlineEdit...
-│   ├── src/office/       # Bộ kết nối Office.js API cho Word, Excel, PowerPoint, Equations
+│   ├── src/office/       # Bộ kết nối Office.js API cho Word, Excel, PowerPoint, Equations (*_extra.ts: công cụ cho bộ skill; *_logic.ts: logic thuần có test)
 │   └── src/lib/          # WebSocket client, quản lý đa ngôn ngữ (i18n)
-└── skills/                # Các skill tự học (office-user-style)
+├── skills/                # 29 skill Office (ppt-*, word-*, excel-*, office-*) và office-user-style
+└── docs/office-skills/    # Khảo sát, danh mục skill, quyết định, vướng mắc, tiến độ
 ```
 
 ---

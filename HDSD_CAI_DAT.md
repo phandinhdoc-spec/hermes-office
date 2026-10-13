@@ -53,6 +53,17 @@ Mô hình AI: **Gemini 3.8 Flash** trả lời nhanh khi bạn sửa nhanh (phí
 
 ---
 
+## Bộ kỹ năng Office (tự cài cùng Hermes)
+
+Khi cài đặt xong, 29 kỹ năng Office (làm slide, soạn báo cáo, soát lỗi, bảng điểm, làm sạch bảng…) đã nằm sẵn trong thư mục `.hermes/skills` của bạn. Bạn không cần làm gì thêm: cứ nói việc cần làm, ví dụ "Tạo file trình chiếu về Coca-Cola" hoặc "Làm sạch bảng này".
+
+- Cập nhật hoặc cài lại riêng các kỹ năng: macOS chạy `./install.sh skills`; Windows chạy lại `install.bat` (hoặc mở Git Bash trong thư mục cài và chạy `./install.sh skills`). Việc này an toàn, chạy bao nhiêu lần cũng được.
+- Kỹ năng bạn tự viết có cùng tên sẽ **không bị ghi đè**.
+- Muốn tắt việc Hermes tự chọn kỹ năng theo câu lệnh: đặt biến môi trường `HERMES_OFFICE_AUTOSKILL=0` rồi khởi động lại dịch vụ.
+- Hermes chỉ gửi **từ khóa chủ đề** khi tìm trên mạng, không gửi nội dung tài liệu của bạn.
+
+---
+
 ## Gặp sự cố?
 
 | Hiện tượng | Cách xử lý |
