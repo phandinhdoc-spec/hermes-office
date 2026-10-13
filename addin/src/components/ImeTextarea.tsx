@@ -1,4 +1,5 @@
 import { forwardRef, useImperativeHandle, useRef, type KeyboardEvent } from "react";
+import { findTokens } from "../lib/prompts";
 
 /**
  * Ô nhập liệu KHÔNG điều khiển (uncontrolled) dành cho gõ tiếng Việt.
@@ -14,6 +15,13 @@ export interface ImeTextareaHandle {
   /** Nối thêm vào cuối (xuống dòng nếu ô đang có chữ). */
   append(v: string): void;
   focus(): void;
+  /**
+   * Select the next (dir = 1) or previous (dir = -1) `[slot]` after/before the caret, wrapping around, so typing replaces it.
+   * Returns false when the text has no slots, letting Tab keep its normal meaning.
+   */
+  selectToken(dir: 1 | -1): boolean;
+  /** Put the caret at the very start (used right after inserting a prompt, before selecting its first slot). */
+  caretToStart(): void;
 }
 
 interface Props {
@@ -50,6 +58,18 @@ const ImeTextarea = forwardRef<ImeTextareaHandle, Props>(function ImeTextarea(
         onTextChange?.(el.current.value);
       },
       focus: () => el.current?.focus(),
+      caretToStart: () => el.current?.setSelectionRange(0, 0),
+      selectToken: (dir) => {
+        const ta = el.current;
+        if (!ta) return false;
+        const toks = findTokens(ta.value);
+        if (!toks.length) return false;
+        const { selectionStart: a, selectionEnd: b } = ta;
+        const pick = dir === 1 ? toks.find((t) => t.start >= b) ?? toks[0] : [...toks].reverse().find((t) => t.end <= a) ?? toks[toks.length - 1];
+        ta.focus();
+        ta.setSelectionRange(pick.start, pick.end);
+        return true;
+      },
     }),
     [onTextChange],
   );

@@ -44,6 +44,10 @@ export interface Workspace {
   reasoning: string | null;
   templates: Template[];
   memory: Note[];
+  /** How often each skill was switched on, to rank the `/` menu. */
+  skillUse: Record<string, number>;
+  /** Skills created from this add-in, flagged "yours" in the `/` menu. */
+  createdSkills: string[];
   /** Estimated tokens after which a long chat is flagged; 0 = never. */
   tokenLimit: number;
   mode: Mode;
@@ -127,6 +131,8 @@ export function loadWorkspace(): Workspace {
         reasoning: typeof raw.reasoning === "string" ? raw.reasoning : null,
         templates: Array.isArray(raw.templates) ? raw.templates : [],
         memory: Array.isArray(raw.memory) ? raw.memory : [],
+        skillUse: raw.skillUse && typeof raw.skillUse === "object" ? raw.skillUse : {},
+        createdSkills: Array.isArray(raw.createdSkills) ? raw.createdSkills : [],
         tokenLimit: typeof raw.tokenLimit === "number" ? raw.tokenLimit : 40000,
         mode: raw.mode === "approve" || raw.mode === "readonly" ? raw.mode : "auto",
       };
@@ -147,7 +153,7 @@ export function loadWorkspace(): Workspace {
       /* ignore */
     }
   }
-  return { chats: [first], projects: [], activeId: first.id, globalRules: "", reasoning: null, templates: [], memory: [], tokenLimit: 40000, mode: "auto" };
+  return { chats: [first], projects: [], activeId: first.id, globalRules: "", reasoning: null, templates: [], memory: [], skillUse: {}, createdSkills: [], tokenLimit: 40000, mode: "auto" };
 }
 
 export function saveWorkspace(ws: Workspace): void {

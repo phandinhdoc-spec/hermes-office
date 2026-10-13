@@ -36,7 +36,9 @@ import ModeSelector from "./ModeSelector";
 import MoreMenu from "./MoreMenu";
 import { AssistantText, hasPartialMachine, stripMachine } from "./Markdown";
 import { toolLabel } from "../lib/toolLabels";
-import TemplatesModal from "./TemplatesModal";
+import PromptModal from "./PromptModal";
+import QuickMenu, { type QuickItem } from "./QuickMenu";
+import { findTokens } from "../lib/prompts";
 import { gotoRef } from "../office/goto";
 import type { Snapshot } from "../office/snapshot";
 import TooltipHost from "./TooltipHost";
@@ -137,8 +139,10 @@ export default function App() {
   const [summarizing, setSummarizing] = useState<string | null>(null);
   const [warnOff, setWarnOff] = useState<string[]>([]);
   const [memoryOpen, setMemoryOpen] = useState(false);
-  const [tplOpen, setTplOpen] = useState(false);
-  const [slashQ, setSlashQ] = useState<string | null>(null);
+  const [tplOpen, setTplOpen] = useState<false | "list" | "new">(false);
+  // `/` skills, `@` prompt library, `#` quick rule: decided from the first character of the message box.
+  const [quick, setQuick] = useState<{ kind: "skill" | "prompt" | "rule"; q: string } | null>(null);
+  const [qIdx, setQIdx] = useState(0);
   const turnLabel = useRef<Record<string, string>>({});
   const attPending = useRef<Record<string, string>>({});
   const [skillCreate, setSkillCreate] = useState<{ open: boolean; busy: boolean; error: string | null }>({ open: false, busy: false, error: null });
@@ -276,6 +280,7 @@ export default function App() {
         if (e.ok) {
           setSkillCreate({ open: false, busy: false, error: null });
           setActiveSkills((a) => (a.includes(e.name) ? a : [...a, e.name]));
+          updateWs((w) => ({ ...w, createdSkills: w.createdSkills.includes(e.name) ? w.createdSkills : [...w.createdSkills, e.name] }));
         } else setSkillCreate((c) => ({ ...c, busy: false, error: e.message ?? "error" }));
         break;
       case "tools_info":
@@ -336,7 +341,7 @@ export default function App() {
         setMsgs((m) => (m.some((x) => x.pending) ? m.map((x) => (x.pending ? { ...x, pending: false, ok: false } : x)) : m));
         break;
     }
-  }, [applyInline]);
+  }, [applyInline, updateWs]);
 
   useEffect(() => {
     const c = new BridgeClient(onEvent, (s) => {
@@ -378,13 +383,15 @@ export default function App() {
 
   const send = async (override?: string) => {
     let text = (override ?? taRef.current?.getValue() ?? "").trim();
-    if (!text || busy) return;
+    if (!text) return;
+    if (text.startsWith("#")) return saveQuickRule(text); // a quick rule is stored locally, never sent to Hermes
+    if (busy) return;
     if (/\{[^}]+\}/.test(text)) {
       let sel = "";
       try { sel = await getSelectionText(); } catch { /* no selection available */ }
       text = fillTemplate(text, { selection: sel, file: (Office.context.document?.url || "").split(/[\\/]/).pop() || "", app: currentHost() });
     }
-    setSlashQ(null);
+    setQuick(null);
     stick.current = true;
     setError(null);
     let context: string | undefined;
@@ -441,6 +448,8 @@ export default function App() {
   const changeSkills = (names: string[]) => {
     setActiveSkills(names);
     safeSend({ type: "set_skills", skills: names });
+    const added = names.filter((n) => !activeSkills.includes(n));
+    if (added.length) updateWs((w) => ({ ...w, skillUse: { ...w.skillUse, ...Object.fromEntries(added.map((n) => [n, (w.skillUse[n] ?? 0) + 1])) } }));
     // A project remembers the skills chosen while working in it.
     const pid = wsRef.current.chats.find((c) => c.id === wsRef.current.activeId)?.projectId;
     if (pid) updateWs((w) => ({ ...w, projects: w.projects.map((p) => (p.id === pid ? { ...p, skills: names } : p)) }));
@@ -543,15 +552,68 @@ export default function App() {
   const curProjectId = ws.chats.find((c) => c.id === ws.activeId)?.projectId ?? null;
   const curProject = ws.projects.find((p) => p.id === curProjectId);
   const userTemplates = ws.templates.filter((x) => !x.projectId || x.projectId === curProjectId);
-  const slashItems: { key: string; name: string; prompt: string }[] = [
-    ...CHIPS.map((c) => ({ key: c.id, name: t(`chip.${c.id}`), prompt: t(`chip.${c.id}.prompt`) })),
-    ...userTemplates.map((x) => ({ key: x.id, name: x.name, prompt: x.prompt })),
-  ].filter((x) => slashQ !== null && x.name.toLowerCase().includes(slashQ.toLowerCase()));
-  const pickSlash = (prompt: string) => {
-    taRef.current?.setValue(prompt);
+  const lc = (quick?.q ?? "").trim().toLowerCase();
+  const slots = (p: string) => new Set(findTokens(p).map((x) => x.text)).size;
+
+  // `/` skills: most used first, then the ones you created
+  const skillScore = (n: string) => (ws.skillUse[n] ?? 0) * 10 + (ws.createdSkills.includes(n) ? 5 : 0) + (activeSkills.includes(n) ? 1 : 0);
+  const skillList = quick?.kind !== "skill" ? [] : skills
+    .filter((x) => x.enabled && (!lc || (x.name + " " + (lang === "vi" ? x.description_vi : x.description_en)).toLowerCase().includes(lc)))
+    .sort((a, b) => Number(b.name.toLowerCase().startsWith(lc)) - Number(a.name.toLowerCase().startsWith(lc)) || skillScore(b.name) - skillScore(a.name) || a.name.localeCompare(b.name))
+    .slice(0, 40);
+  // `@` prompt library: yours first, then the built-in quick actions
+  const promptList = quick?.kind !== "prompt" ? [] : [
+    ...userTemplates.map((x) => ({ key: x.id, name: x.name, prompt: x.prompt, builtin: false })),
+    ...CHIPS.map((c) => ({ key: c.id, name: t(`chip.${c.id}`), prompt: t(`chip.${c.id}.prompt`), builtin: true })),
+  ].filter((x) => !lc || (x.name + " " + x.prompt).toLowerCase().includes(lc));
+  const quickItems: QuickItem[] =
+    quick?.kind === "skill"
+      ? skillList.map((x) => ({
+          key: x.name, title: x.name, checked: activeSkills.includes(x.name),
+          sub: (lang === "vi" ? x.description_vi : x.description_en) || x.description_en,
+          badges: [ws.createdSkills.includes(x.name) ? t("quick.mine") : "", ws.skillUse[x.name] ? t("quick.used", { n: ws.skillUse[x.name] }) : ""].filter(Boolean),
+        }))
+      : promptList.map((x) => ({ key: x.key, title: x.name, sub: x.prompt.replace(/\s+/g, " "), badges: [x.builtin ? t("quick.builtin") : "", slots(x.prompt) ? t("pl.slotCount", { n: slots(x.prompt) }) : ""].filter(Boolean) }));
+
+  const detectQuick = (v: string) => {
+    setQIdx(0);
+    if (v.includes("\n")) return setQuick(null);
+    setQuick(v.startsWith("/") ? { kind: "skill", q: v.slice(1) } : v.startsWith("@") ? { kind: "prompt", q: v.slice(1) } : v.startsWith("#") ? { kind: "rule", q: v.replace(/^#+\s*/, "") } : null);
+  };
+  /** Put a prompt in the box and select its first [slot]; Tab / Shift+Tab then walk through the slots. */
+  const insertPrompt = (prompt: string) => {
+    const ta = taRef.current;
+    if (!ta) return;
+    ta.setValue(prompt);
     setHasInput(true);
-    setSlashQ(null);
-    setTimeout(() => taRef.current?.focus(), 0);
+    setQuick(null);
+    ta.focus();
+    ta.caretToStart();
+    ta.selectToken(1);
+  };
+  const pickQuick = (i: number) => {
+    if (quick?.kind === "skill" && skillList[i]) {
+      const name = skillList[i].name;
+      const on = activeSkills.includes(name);
+      changeSkills(on ? activeSkills.filter((n) => n !== name) : [...activeSkills, name]);
+      taRef.current?.setValue("");
+      setHasInput(false);
+      setQuick(null);
+      setNotice(t(on ? "quick.skillOff" : "quick.skillOn", { name }));
+    } else if (quick?.kind === "prompt" && promptList[i]) insertPrompt(promptList[i].prompt);
+  };
+  /** `# text` appends a rule to the project's rules (or the global rules); `## text` always uses the global ones. */
+  const saveQuickRule = (raw: string) => {
+    const body = raw.replace(/^#+\s*/, "").trim();
+    if (!body) return;
+    const global = raw.startsWith("##") || !curProjectId;
+    const add = (r: string) => (r.trim() ? r.trimEnd() + "\n" : "") + "- " + body;
+    if (global) updateWs((w) => ({ ...w, globalRules: add(w.globalRules) }));
+    else updateWs((w) => ({ ...w, projects: w.projects.map((p) => (p.id === curProjectId ? { ...p, rules: add(p.rules) } : p)) }));
+    taRef.current?.setValue("");
+    setHasInput(false);
+    setQuick(null);
+    setNotice(t("rule.saved", { scope: global ? t("rule.scopeGlobal") : t("rule.scopeProject", { name: curProject?.name ?? "" }), text: body }));
   };
 
   // 5 + 9. modes and approval
@@ -940,7 +1002,6 @@ export default function App() {
         <span className="mx-1 h-4 w-px bg-gray-500/25" aria-hidden />
         <IconButton tip={t("header.inline", { key: shortcutLabel })} onClick={() => void openInline()}><IconEdit /></IconButton>
         <IconButton tip={activeSkills.length ? t("header.skillsActive", { n: activeSkills.length }) : t("header.skills")} onClick={() => setSkillsOpen(true)} active={activeSkills.length > 0}><IconSkills /></IconButton>
-        <IconButton tip={t("header.tools")} onClick={() => setTab(chat ? "tools" : "chat")} active={!chat}><IconTools /></IconButton>
         <span className="min-w-0 flex-1 truncate px-1.5 text-center text-[10.5px] text-gray-500" data-tip={t("ctx.meter", { n: fmtTok(tokens) })}>
           {(curProject ? curProject.name + " › " : "") + (chatTitle || t("chats.untitled"))}
           {msgs.length > 0 && <span className={"ml-1 " + (overLimit ? "font-semibold text-amber-600" : "opacity-70")}>≈{fmtTok(tokens)}</span>}
@@ -951,7 +1012,8 @@ export default function App() {
           items={[
             { label: "📐 " + t("tb.rules"), onClick: () => setRulesModal({ kind: "global" }) },
             { label: "🧠 " + t("more.memory"), onClick: () => setMemoryOpen(true) },
-            { label: "⚡ " + t("more.templates"), onClick: () => setTplOpen(true) },
+            { label: "📚 " + t("more.templates"), onClick: () => setTplOpen("list") },
+            { label: chat ? "🧰 " + t("more.tools") : "💬 " + t("more.backToChat"), onClick: () => setTab(chat ? "tools" : "chat") },
             { label: "", onClick: () => {}, sep: true },
             { label: "⬇ " + t("more.export"), onClick: downloadMd, disabled: !msgs.length },
             { label: "⧉ " + t("more.copyMd"), onClick: copyMd, disabled: !msgs.length },
@@ -1000,28 +1062,22 @@ export default function App() {
               {t(`chip.${c.id}`)}
             </button>
           ))}
-          {userTemplates.map((x: Template) => (
-            <button
-              key={x.id}
-              type="button"
-              disabled={!!busy || conn !== "open"}
-              onClick={() => { setUseSelection(true); void send(x.prompt); }}
-              data-tip={x.prompt.slice(0, 120)}
-              className="inline-flex h-5 max-w-[120px] items-center rounded-full border border-violet-600/40 bg-violet-500/10 px-2 text-[11px] font-medium text-violet-700 hover:bg-violet-500/20 disabled:opacity-40 dark:border-violet-400/40 dark:bg-violet-400/10 dark:text-violet-300 dark:hover:bg-violet-400/20"
-            >
-              <span className="truncate">{x.name}</span>
-            </button>
-          ))}
         </div>
         <div className="relative rounded-xl border border-gray-500/30 bg-gray-500/[0.04] focus-within:border-indigo-500/60 focus-within:shadow-[0_0_0_3px_rgba(99,102,241,.12)]">
-          {slashQ !== null && slashItems.length > 0 && (
-            <div role="listbox" className="animate-pop absolute bottom-full left-0 z-50 mb-1 max-h-48 w-full overflow-y-auto rounded-xl border border-gray-500/25 bg-white p-1 shadow-xl dark:bg-[#1c1f24]">
-              {slashItems.map((x, i) => (
-                <button key={x.key} type="button" role="option" aria-selected={i === 0} onMouseDown={(e) => e.preventDefault()} onClick={() => pickSlash(x.prompt)} className={"block w-full rounded-md px-2 py-1 text-left hover:bg-gray-500/15 " + (i === 0 ? "bg-gray-500/10" : "")}>
-                  <span className="block truncate text-[12px] font-medium">/{x.name}</span>
-                  <span className="block truncate text-[10.5px] text-gray-500">{x.prompt}</span>
-                </button>
-              ))}
+          {(quick?.kind === "skill" || quick?.kind === "prompt") && (
+            <QuickMenu
+              title={t(quick.kind === "skill" ? "quick.skillTitle" : "quick.promptTitle")}
+              items={quickItems}
+              index={Math.min(qIdx, Math.max(0, quickItems.length - 1))}
+              empty={t("quick.none")}
+              footer={quick.kind === "prompt" ? { label: t("quick.newPrompt"), onClick: () => { taRef.current?.setValue(""); setHasInput(false); setQuick(null); setTplOpen("new"); } } : undefined}
+              onPick={pickQuick}
+              onHover={setQIdx}
+            />
+          )}
+          {quick?.kind === "rule" && (
+            <div className="animate-pop absolute bottom-full left-0 z-50 mb-1 w-full rounded-xl border border-amber-500/40 bg-amber-50 px-2 py-1.5 text-[11px] text-amber-900 shadow-xl dark:bg-[#2a2415] dark:text-amber-200">
+              {t("rule.hint", { scope: !curProjectId ? t("rule.scopeGlobal") : t("rule.scopeProject", { name: curProject?.name ?? "" }) })}
             </div>
           )}
           {att.length > 0 && (
@@ -1041,14 +1097,27 @@ export default function App() {
           <ImeTextarea
             ref={taRef}
             rows={5}
-            onTextChange={(v) => { setHasInput(!!v.trim()); setSlashQ(v.startsWith("/") && !v.includes("\n") ? v.slice(1) : null); }}
+            onTextChange={(v) => { setHasInput(!!v.trim()); detectQuick(v); }}
             placeholder={t("composer.placeholder")}
             className="block min-h-[110px] w-full px-2.5 pb-1 pt-2 text-[13px] leading-[1.6] placeholder:text-gray-400"
             onKeyDown={(e) => {
-              if (e.key === "Escape" && slashQ !== null) setSlashQ(null);
-              if (e.key === "Enter" && !e.shiftKey && !isImeKey(e)) {
+              if (isImeKey(e)) return;
+              const menu = quick?.kind === "skill" || quick?.kind === "prompt";
+              if (quick && e.key === "Escape") return setQuick(null);
+              if (menu && quickItems.length) {
+                if (e.key === "ArrowDown" || e.key === "ArrowUp") {
+                  e.preventDefault();
+                  return setQIdx((i) => (i + (e.key === "ArrowDown" ? 1 : -1) + quickItems.length) % quickItems.length);
+                }
+                if ((e.key === "Enter" && !e.shiftKey) || (e.key === "Tab" && !e.shiftKey)) {
+                  e.preventDefault();
+                  return pickQuick(Math.min(qIdx, quickItems.length - 1));
+                }
+              }
+              // Tab / Shift+Tab walk through the [slots] of an inserted prompt; with no slots Tab keeps its normal meaning.
+              if (e.key === "Tab" && taRef.current?.selectToken(e.shiftKey ? -1 : 1)) return e.preventDefault();
+              if (e.key === "Enter" && !e.shiftKey) {
                 e.preventDefault();
-                if (slashQ !== null && slashItems.length) return pickSlash(slashItems[0].prompt);
                 void send();
               }
             }}
@@ -1176,7 +1245,18 @@ export default function App() {
           onClose={() => setMemoryOpen(false)}
         />
       )}
-      {tplOpen && <TemplatesModal templates={ws.templates} projectId={curProjectId} projectName={curProject?.name} onChange={(tp) => updateWs((w) => ({ ...w, templates: tp }))} onClose={() => setTplOpen(false)} />}
+      {tplOpen && (
+        <PromptModal
+          key={tplOpen}
+          start={tplOpen}
+          templates={ws.templates}
+          projectId={curProjectId}
+          projectName={curProject?.name}
+          onChange={(tp) => updateWs((w) => ({ ...w, templates: tp }))}
+          onUse={(p) => { setTplOpen(false); setTab("chat"); setTimeout(() => insertPrompt(p), 0); }}
+          onClose={() => setTplOpen(false)}
+        />
+      )}
       {skillCreate.open && (
         <SkillCreateModal busy={skillCreate.busy} error={skillCreate.error} onCreate={createSkill} onClose={() => setSkillCreate({ open: false, busy: false, error: null })} />
       )}
