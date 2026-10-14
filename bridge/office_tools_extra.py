@@ -61,6 +61,10 @@ EXTRA_TOOLS: Dict[str, Dict[str, Any]] = {
     "office_word_find_replace": {"host": "word", "args": {
         "find": "plain text (not a regular expression)", "replace": "string (may be empty)", "matchCase": "bool (default false)",
         "wholeWord": "bool (default false)", "which": "document|selection (default document)", "max": "number (default 500)"}},
+    "office_word_highlight": {"host": "word", "args": {
+        "texts": "[\"exact phrase or sentence\", ...] (max 60; each up to 255 characters; only these are marked, the rest of the text is untouched)",
+        "color": "Yellow|BrightGreen|Turquoise|Pink|Red|Blue|none (default Yellow; none removes the highlight)",
+        "bold": "bool (optional)", "fontColor": HEX + " (optional)", "matchCase": "bool (default false)", "which": "document|selection (default document)"}},
     "office_word_set_numbering": {"host": "word", "args": {
         "style": "bullet|number|none", "indices": "paragraph numbers from office_word_get_outline (optional, default the selection)"}},
     "office_word_get_outline": {"host": "word", "args": {

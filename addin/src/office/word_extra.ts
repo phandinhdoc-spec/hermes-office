@@ -176,6 +176,32 @@ export async function findReplace(a: Args): Promise<unknown> {
   });
 }
 
+export async function highlight(a: Args): Promise<unknown> {
+  requireHost("word");
+  const texts: string[] = (Array.isArray(a.texts) ? a.texts : a.text ? [a.text] : []).map((x: unknown) => String(x).trim()).filter(Boolean).slice(0, 60);
+  if (!texts.length) throw new Error("Cần texts: danh sách cụm từ/câu cần tô");
+  const color = a.color === "none" ? null : String(a.color ?? "Yellow");
+  const bold = a.bold === true;
+  const fontColor = a.fontColor ? String(a.fontColor) : undefined;
+  return Word.run(async (ctx) => {
+    const scope = a.which === "selection" ? ctx.document.getSelection() : ctx.document.body;
+    const hits = texts.map((t) => ({ t, r: scope.search(t.slice(0, 255), { matchCase: !!a.matchCase, matchWholeWord: false, matchWildcards: false }) }));
+    hits.forEach((h) => h.r.load("items"));
+    await ctx.sync();
+    const report: { text: string; found: number }[] = [];
+    for (const h of hits) {
+      h.r.items.slice(0, 200).forEach((r) => {
+        r.font.highlightColor = color as any;
+        if (bold) r.font.bold = true;
+        if (fontColor) r.font.color = fontColor;
+      });
+      report.push({ text: h.t.slice(0, 60), found: h.r.items.length });
+    }
+    await ctx.sync();
+    return { ok: true, highlighted: report.filter((x) => x.found).length, notFound: report.filter((x) => !x.found).map((x) => x.text), detail: report };
+  });
+}
+
 export async function addComment(a: Args): Promise<unknown> {
   requireHost("word");
   const text = String(a.text ?? "").trim();
@@ -336,6 +362,7 @@ export const wordExtraTools: Record<string, (a: Args) => Promise<unknown>> = {
   office_word_insert_toc: insertToc,
   office_word_add_comment: addComment,
   office_word_find_replace: findReplace,
+  office_word_highlight: highlight,
   office_word_set_numbering: setNumbering,
   office_word_get_outline: getOutline,
   office_word_apply_style_by_index: applyStyleByIndex,

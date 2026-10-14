@@ -63,6 +63,7 @@ const ROWS: [string, string, string, string, string][] = [
   ["word_set_header_footer", "đặt đầu trang, chân trang", "Setting header and footer", "Set header and footer", "set header and footer"],
   ["word_insert_toc", "chèn mục lục", "Inserting a table of contents", "Inserted a table of contents", "insert a table of contents"],
   ["word_add_comment", "thêm bình luận", "Adding a comment", "Added a comment", "add a comment"],
+  ["word_highlight", "tô nổi bật các cụm từ", "Highlighting phrases", "Highlighted phrases", "highlight phrases"],
   ["word_find_replace", "tìm và thay thế", "Finding and replacing", "Found and replaced", "find and replace"],
   ["word_set_numbering", "đặt danh sách đánh số", "Setting up a list", "Set up a list", "set up a list"],
   ["word_get_outline", "xem cấu trúc văn bản", "Reading the document outline", "Read the document outline", "read the document outline"],
