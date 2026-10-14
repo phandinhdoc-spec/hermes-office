@@ -6,6 +6,7 @@ client -> bridge
   {"type": "status"}
   {"type": "chat", "id": str, "text": str, "host": "word|excel|powerpoint", "context": str?}
   {"type": "cancel", "id": str}
+  {"type": "set_tier", "tier": "auto|fast|standard|heavy"}   (auto = the executive decides per request)
   {"type": "list_models"} | {"type": "set_model", "model": str, "provider": str?}
   {"type": "list_skills"} | {"type": "set_skills", "skills": [str]} | {"type": "get_skill", "name": str}
   {"type": "restore_history", "messages": [{"role": "user|assistant", "content": str}]}  (only if history is empty)
@@ -72,6 +73,7 @@ from fastapi.responses import FileResponse
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))  # sibling modules: office_web, office_calc, office_skills ...
 import office_calc  # noqa: E402
+import office_executive  # noqa: E402
 import office_skills  # noqa: E402
 import office_tools_extra  # noqa: E402
 import office_web  # noqa: E402
@@ -89,6 +91,12 @@ CORE_MODEL = os.environ.get("HERMES_CORE_MODEL", "claude-3-5-sonnet") or None
 CORE_PROVIDER = os.environ.get("HERMES_CORE_PROVIDER") or None
 FAST_MODEL = os.environ.get("HERMES_FAST_MODEL", "gemini-3.8-flash") or None
 FAST_PROVIDER = os.environ.get("HERMES_FAST_PROVIDER") or None
+# Heavy tier (decks, reports, batch jobs; see office_executive.py). Empty = same as the core model.
+HEAVY_MODEL = os.environ.get("HERMES_HEAVY_MODEL") or None
+HEAVY_PROVIDER = os.environ.get("HERMES_HEAVY_PROVIDER") or None
+# Optional `hermes -t` toolsets for chat turns (e.g. a minimal set, to stop Hermes planning/delegating on its own). Empty = Hermes default.
+CHAT_TOOLSETS = os.environ.get("HERMES_OFFICE_TOOLSETS") or None
+TIMING_LOG = os.environ.get("HERMES_OFFICE_TIMING_LOG") or None  # append one JSON line per chat turn
 # Official installers used by the in-extension setup flow (override with env vars; empty = unsupported).
 HERMES_INSTALL_URL = os.environ.get(
     "HERMES_INSTALL_URL", "https://raw.githubusercontent.com/NousResearch/hermes-agent/main/scripts/install.sh"
@@ -501,12 +509,17 @@ MEMORY_RE = re.compile(r"```office-memory\s*(\{.*?\})\s*```", re.DOTALL)
 
 
 def build_prompt(host: str, history: List[Dict[str, str]], context: Optional[str], rules: str = "",
-                 memory: str = "", attachments: Optional[List[Dict[str, Any]]] = None, mode: str = "auto") -> str:
+                 memory: str = "", attachments: Optional[List[Dict[str, Any]]] = None, mode: str = "auto",
+                 plan: Optional["office_executive.Plan"] = None, user_text: str = "") -> str:
     app = {"word": "Word", "excel": "Excel", "powerpoint": "PowerPoint"}.get(host, "Office")
-    tools = "\n".join(
-        f"- {name}({json.dumps(spec['args'])})" for name, spec in TOOLS.items() if spec["host"] in (host, "bridge") or host not in ("word", "excel", "powerpoint")
-    )
-    parts = [SYSTEM_PREAMBLE.format(app=app, tools=tools), style_prompt_section(host)]
+    names = [n for n, spec in TOOLS.items() if spec["host"] in (host, "bridge") or host not in ("word", "excel", "powerpoint")]
+    if plan is not None:  # the executive lists only the tool families this request can use
+        names = office_executive.select_tools(plan, user_text, names, has_docs=bool(attachments))
+    tools = "\n".join(f"- {n}({json.dumps(TOOLS[n]['args'])})" for n in names)
+    preamble = SYSTEM_PREAMBLE.format(app=app, tools=tools)
+    if plan is not None:
+        preamble = office_executive.slim_preamble(preamble, plan, host, user_text)
+    parts = [preamble, style_prompt_section(host)]
     if rules.strip():
         parts.append("User rules (always follow these, they override defaults):\n" + rules.strip()[:RULES_MAX] + "\n")
     parts.append(MEMORY_HELP)
@@ -1139,12 +1152,15 @@ def font_pairs(vibe: Optional[str], platform: str) -> Dict[str, Any]:
 # --------------------------------------------------------------------------- sessions / RPC
 
 
-def route_model(sess: "Session", fast: bool = False) -> Dict[str, Optional[str]]:
-    """An explicit UI selection wins; otherwise core for chat and fast for interactive inline edits."""
+def route_model(sess: "Session", fast: bool = False, key: Optional[str] = None) -> Dict[str, Optional[str]]:
+    """An explicit UI selection wins; otherwise by tier key ('fast' | 'core' | 'heavy'), or fast for interactive inline edits."""
     if sess.model:
         return {"model": sess.model, "provider": sess.provider}
-    if fast and FAST_MODEL:
+    key = key or ("fast" if fast else "core")
+    if key == "fast" and FAST_MODEL:
         return {"model": FAST_MODEL, "provider": fast_provider()}
+    if key == "heavy" and HEAVY_MODEL:
+        return {"model": HEAVY_MODEL, "provider": HEAVY_PROVIDER or CORE_PROVIDER}
     return {"model": CORE_MODEL, "provider": CORE_PROVIDER}
 
 
@@ -1418,6 +1434,7 @@ class Session:
         self.memory: str = ""
         self.attachments: List[Dict[str, Any]] = []  # [{"name", "doc": Doc}]
         self.mode: str = "auto"
+        self.tier_pref: str = os.environ.get("HERMES_OFFICE_TIER", "auto") if os.environ.get("HERMES_OFFICE_TIER") in ("fast", "standard", "heavy") else "auto"
         self.approvals: Dict[str, "asyncio.Future[bool]"] = {}
 
     async def send(self, msg: Dict[str, Any]) -> None:
@@ -1488,15 +1505,44 @@ async def handle_chat(sess: Session, msg: Dict[str, Any]) -> None:
     if auto:
         log.info("auto skills for %s: %s", host, ", ".join(auto))
         await sess.send({"type": "skills_auto", "id": cid, "skills": auto})
+    # The executive (office_executive.py): how big is this job, which model and reasoning level, how many rounds.
+    user_text = str(msg.get("text", ""))
+    _, big_docs = split_docs(sess.attachments) if sess.attachments else ([], [])
+    plan = office_executive.classify(
+        user_text, host, context=str(context or ""), attachments=len(sess.attachments), big_attachment=bool(big_docs),
+        history_turns=sum(1 for m in sess.history if m["role"] == "user") - 1, skills=turn_skills or (),
+        forced=None if sess.tier_pref == "auto" else sess.tier_pref, max_rounds=MAX_TOOL_ROUNDS,
+    )
+    t_start = time.monotonic()
+    rounds_log: List[Dict[str, Any]] = []
+    tool_errors = 0
+
+    async def announce(why_override: Optional[str] = None) -> None:
+        chosen = route_model(sess, key=plan.model_key)
+        await sess.send({"type": "tier", "id": cid, "tier": plan.tier, "why": why_override or plan.why, "model": chosen["model"],
+                         "reasoning": sess.reasoning or plan.reasoning or None, "auto": sess.tier_pref == "auto"})
+
     try:
-        for _ in range(MAX_TOOL_ROUNDS):
+        await announce()
+        rounds = 0
+        while rounds < MAX_TOOL_ROUNDS:
+            if plan.tier != "heavy" and rounds >= plan.max_rounds:  # this tier's round budget is spent: promote
+                plan = office_executive.escalate(plan, f"hết {plan.max_rounds} vòng của bậc {plan.tier}", MAX_TOOL_ROUNDS)
+                await announce()
+            rounds += 1
+            t_round = time.monotonic()
+            first_chunk: List[float] = []
+
             async def on_chunk(t: str) -> None:
+                if not first_chunk:
+                    first_chunk.append(time.monotonic() - t_round)
                 await sess.send({"type": "delta", "id": cid, "text": t})
 
             reply = await run_hermes(
-                build_prompt(host, sess.history, context, sess.rules, sess.memory, sess.attachments, sess.mode), on_chunk,
-                skills=turn_skills, reasoning=sess.reasoning, **route_model(sess),
+                build_prompt(host, sess.history, context, sess.rules, sess.memory, sess.attachments, sess.mode, plan=plan, user_text=user_text), on_chunk,
+                skills=turn_skills, toolsets=CHAT_TOOLSETS, reasoning=sess.reasoning or plan.reasoning or None, **route_model(sess, key=plan.model_key),
             )
+            rounds_log.append({"tier": plan.tier, "first_chunk_s": round(first_chunk[0], 2) if first_chunk else None, "round_s": round(time.monotonic() - t_round, 2), "reply_chars": len(reply)})
             sess.history.append({"role": "assistant", "content": reply})
             for mm in MEMORY_RE.findall(reply):
                 try:
@@ -1548,7 +1594,19 @@ async def handle_chat(sess: Session, msg: Dict[str, Any]) -> None:
                     await sess.send({"type": "tool_result", "id": cid, "tool": tool, "ok": False, "result": str(exc)})
             sess.history.append({"role": "tool", "content": json.dumps(results, ensure_ascii=False)})
             await sess.send({"type": "delta", "id": cid, "text": "\n"})
-        await sess.send({"type": "done", "id": cid})
+            tool_errors += sum(1 for r in results if "error" in r)
+            if plan.tier == "fast" and tool_errors >= 2:  # the small model is stumbling: hand over to the next tier
+                plan = office_executive.escalate(plan, "công cụ lỗi 2 lần", MAX_TOOL_ROUNDS)
+                await announce()
+        stats = {"tier": plan.tier, "rounds": rounds, "total_s": round(time.monotonic() - t_start, 2), "rounds_detail": rounds_log}
+        log.info("chat %s done: %s", cid[:8], json.dumps(stats, ensure_ascii=False))
+        if TIMING_LOG:
+            try:
+                with open(TIMING_LOG, "a", encoding="utf-8") as fh:
+                    fh.write(json.dumps({"at": datetime.now(timezone.utc).isoformat(), "host": host, "words": len(user_text.split()), **stats}, ensure_ascii=False) + "\n")
+            except OSError:
+                pass
+        await sess.send({"type": "done", "id": cid, "stats": stats})
     except asyncio.CancelledError:
         await sess.send({"type": "done", "id": cid, "cancelled": True})
         raise
@@ -1970,6 +2028,13 @@ async def ws_endpoint(ws: WebSocket) -> None:
                     await sess.send({"type": "skills_active", "active": names})
                 else:
                     await sess.send({"type": "error", "message": "invalid skill name", "code": "invalid_skill"})
+            elif kind == "set_tier":
+                val = msg.get("tier") or "auto"
+                if val not in ("auto", "fast", "standard", "heavy"):
+                    await sess.send({"type": "error", "message": f"invalid tier: {val}"})
+                else:
+                    sess.tier_pref = val
+                    await sess.send({"type": "tier_pref", "value": val})
             elif kind == "set_reasoning":
                 lvl = msg.get("level") or None
                 if lvl is not None and lvl not in REASONING_LEVELS:

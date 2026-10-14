@@ -190,6 +190,23 @@ Chỉ cần nói việc cần làm bằng lời thường, Hermes tự chọn sk
 - **Giới hạn đã biết:** PowerPoint chưa cho tiện ích ghi vào ngăn *Ghi chú* nên lời thuyết trình được lưu trong khung "Hermes-GhiChu" nằm dưới slide (không hiện khi chiếu); không làm được hoạt ảnh và hiệu ứng chuyển slide; ảnh được đặt vừa khung giữ nguyên tỉ lệ, không cắt xén. Chi tiết: `docs/office-skills/BLOCKERS.md`.
 - **Tài liệu kỹ thuật:** `docs/office-skills/` (khảo sát, danh mục, quyết định, vướng mắc, tiến độ và danh sách việc cần thử trong Office thật).
 
+### 8. Điều phối theo bậc: nhanh · chuẩn · nặng
+
+Trước khi gọi model, cầu nối tự đánh giá yêu cầu (không tốn lượt model, dưới 1 mili-giây) rồi chọn cách chạy:
+
+| Bậc | Việc | Model | Suy luận | Vòng tối đa |
+|---|---|---|---|---|
+| ⚡ Nhanh | một thao tác: tô màu, tìm, thay, định dạng, viết lại một câu, dịch/tóm tắt một đoạn | `HERMES_FAST_MODEL` | thấp | 4 |
+| ⚙ Chuẩn | soạn hoặc sửa nội dung vừa phải | `HERMES_CORE_MODEL` | vừa | 8 |
+| 🧠 Nặng | bộ slide, báo cáo, đề thi, hàng loạt/toàn bộ tài liệu, tài liệu đính kèm lớn, skill lớn | `HERMES_HEAVY_MODEL` (trống = model lõi) | cao | 14 |
+
+- **Bạn chọn tay luôn thắng:** model và mức suy luận đã chọn trong giao diện không bao giờ bị thay; khi để "Tự động" mới phân loại. Gửi `{"type":"set_tier","tier":"fast|standard|heavy|auto"}` (hoặc biến `HERMES_OFFICE_TIER`) để ép một bậc.
+- **Tự nâng bậc:** việc nhanh mà công cụ lỗi 2 lần, hoặc hết vòng của bậc, sẽ được chuyển lên bậc trên.
+- **Prompt gọn:** bậc nhanh/chuẩn chỉ liệt kê công cụ web, màu, tính điểm, thói quen khi yêu cầu cần đến, và bỏ các đoạn hướng dẫn công thức/PowerPoint/web không liên quan.
+- **Đo thời gian:** mỗi lượt ghi bậc, số vòng, thời gian tới chữ đầu tiên của từng vòng vào nhật ký; đặt `HERMES_OFFICE_TIMING_LOG=/đường/dẫn/timing.jsonl` để lưu mỗi lượt một dòng JSON.
+- **Biến môi trường:** `HERMES_OFFICE_TIERING=0` tắt toàn bộ; `HERMES_HEAVY_MODEL`/`HERMES_HEAVY_PROVIDER` đặt model bậc nặng; `HERMES_OFFICE_TOOLSETS` giới hạn toolset của Hermes cho lượt chat (ví dụ để Hermes không tự lập kế hoạch/giao việc).
+- **Chưa làm:** chạy song song nhiều tác vụ độc lập (đợt sau, khi có số đo).
+
 ## 📂 Cấu trúc dự án
 
 ```
@@ -198,7 +215,7 @@ hermes-office/
 ├── install.sh / install.command / install.bat / install.ps1   # Script tự động cài đặt, sinh SSL, sideload và cấu hình daemon
 ├── bridge/                # Backend daemon FastAPI + WebSocket bridge
 │   ├── hermes_office_bridge.py
-│   └── office_web.py / office_calc.py / office_skills.py / office_tools_extra.py   # web+ảnh, tính điểm, định tuyến & cài skill, khai báo công cụ mới
+│   └── office_web.py / office_calc.py / office_skills.py / office_tools_extra.py / office_executive.py   # web+ảnh, tính điểm, định tuyến & cài skill, khai báo công cụ mới, điều phối theo bậc
 ├── addin/                 # Frontend Task Pane (React + TypeScript + Tailwind CSS)
 │   ├── src/components/   # Các component giao diện: App, ModelSelector, SkillsDrawer, InlineEdit...
 │   ├── src/office/       # Bộ kết nối Office.js API cho Word, Excel, PowerPoint, Equations (*_extra.ts: công cụ cho bộ skill; *_logic.ts: logic thuần có test)

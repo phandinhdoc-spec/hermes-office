@@ -280,6 +280,11 @@ export default function App() {
       case "skills_auto":
         setNotice(tRef.current("skills.auto", { names: e.skills.join(", ") }));
         break;
+      case "tier":
+        setNotice(tRef.current(`tier.${e.tier}`, { model: e.model ?? "Hermes", why: e.why }));
+        break;
+      case "tier_pref":
+        break;
       case "skill_created":
         if (e.ok) {
           setSkillCreate({ open: false, busy: false, error: null });

@@ -34,6 +34,8 @@ export type BridgeEvent =
   | { type: "skills"; skills: SkillInfo[]; active: string[] }
   | { type: "skills_active"; active: string[] }
   | { type: "skills_auto"; id: string; skills: string[] }
+  | { type: "tier"; id: string; tier: "fast" | "standard" | "heavy"; why: string; model: string | null; reasoning: string | null; auto: boolean }
+  | { type: "tier_pref"; value: string }
   | { type: "mode"; mode: string }
   | { type: "approval_request"; id: string; rid: string; calls: { tool: string; args: unknown }[] }
   | { type: "memory_proposal"; id: string; note: string }
@@ -44,7 +46,7 @@ export type BridgeEvent =
   | { type: "skill_created"; ok: boolean; name: string; message?: string; path?: string }
   | { type: "skill_detail"; skill: SkillDetail | null; name?: string }
   | { type: "tools_info"; office: OfficeToolInfo[]; hermes: ToolsetInfo[] }
-  | { type: "done"; id: string; cancelled?: boolean }
+  | { type: "done"; id: string; cancelled?: boolean; stats?: { tier: string; rounds: number; total_s: number } }
   | { type: "error"; id?: string; message: string; code?: string };
 
 export interface ModelOption {

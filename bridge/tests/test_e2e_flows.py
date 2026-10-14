@@ -189,3 +189,77 @@ def test_user_chosen_skills_are_kept_and_the_router_can_be_switched_off(env, mon
     monkeypatch.setenv("HERMES_OFFICE_AUTOSKILL", "0")
     run(fake2, monkeypatch, "excel", "Làm sạch bảng này")
     assert fake2.skills_of(fake2.calls[0]) == []
+
+
+# ------------------------------------------------------------------------------------------------ executive (tiers)
+
+
+def argv_value(call, flag):
+    a = call["argv"]
+    return a[a.index(flag) + 1] if flag in a else None
+
+
+def test_small_job_runs_on_the_fast_model_with_low_reasoning_and_a_slim_prompt(env, monkeypatch):
+    monkeypatch.setattr(bridge, "FAST_MODEL", "fast-x")
+    monkeypatch.setattr(bridge, "CORE_MODEL", "core-x")
+    fake = FakeHermes(env / "fake", ["Đã xong."])
+    tp, turn = run(fake, monkeypatch, "word", "tô vàng chữ quang hợp")
+    call = fake.calls[0]
+    assert argv_value(call, "-m") == "fast-x" and argv_value(call, "--reasoning") == "low"
+    assert "Math, physics and chemistry" not in call["prompt"] and "office_web_search" not in call["prompt"]
+    tier = [e for e in turn if e["type"] == "tier"][0]
+    assert tier["tier"] == "fast" and tier["auto"] is True
+    done = turn[-1]
+    assert done["type"] == "done" and done["stats"]["rounds"] == 1 and done["stats"]["tier"] == "fast"
+
+
+def test_big_job_runs_on_the_heavy_model_with_the_full_prompt(env, monkeypatch):
+    monkeypatch.setattr(bridge, "CORE_MODEL", "core-x")
+    monkeypatch.setattr(bridge, "HEAVY_MODEL", "heavy-x")
+    fake = FakeHermes(env / "fake", ["Xong."])
+    run(fake, monkeypatch, "powerpoint", "Làm bộ slide 12 trang về quang hợp cho lớp 8")
+    call = fake.calls[0]
+    assert argv_value(call, "-m") == "heavy-x" and argv_value(call, "--reasoning") == "high"
+    assert "Web and pictures" in call["prompt"] and "office_web_search" in call["prompt"]
+
+
+def test_a_model_and_reasoning_chosen_by_hand_are_never_replaced(env, monkeypatch):
+    fake = FakeHermes(env / "fake", ["Xong."])
+    fake.env(monkeypatch)
+    with TestClient(bridge.app) as client:
+        with client.websocket_connect("/ws") as ws:
+            tp = FakeTaskpane(ws)
+            tp.send({"type": "set_model", "model": "mine", "provider": None})
+            tp.send({"type": "set_reasoning", "level": "xhigh"})
+            tp.chat("Làm bộ slide 12 trang về quang hợp", "powerpoint")
+    call = fake.calls[0]
+    assert argv_value(call, "-m") == "mine" and argv_value(call, "--reasoning") == "xhigh"
+
+
+def test_fast_job_is_promoted_after_two_tool_errors(env, monkeypatch):
+    monkeypatch.setattr(bridge, "FAST_MODEL", "fast-x")
+    monkeypatch.setattr(bridge, "CORE_MODEL", "core-x")
+    block = tool_block("office_calc_split_points", {"nonsense": True})  # a bridge-side tool that refuses these arguments
+    fake = FakeHermes(env / "fake", [block + "\n" + block, "Xong."])
+    tp, turn = run(fake, monkeypatch, "word", "tô vàng chữ này")
+    assert [r for r in turn if r["type"] == "tool_result" and not r["ok"]], "the tool calls were expected to fail"
+    assert [e["tier"] for e in turn if e["type"] == "tier"] == ["fast", "standard"]
+    assert argv_value(fake.calls[0], "-m") == "fast-x" and argv_value(fake.calls[1], "-m") == "core-x"
+
+
+def test_forced_tier_and_switching_the_executive_off(env, monkeypatch):
+    monkeypatch.setattr(bridge, "FAST_MODEL", "fast-x")
+    monkeypatch.setattr(bridge, "CORE_MODEL", "core-x")
+    monkeypatch.setattr(bridge, "HEAVY_MODEL", "heavy-x")
+    fake = FakeHermes(env / "fake", ["ok"])
+    fake.env(monkeypatch)
+    with TestClient(bridge.app) as client:
+        with client.websocket_connect("/ws") as ws:
+            tp = FakeTaskpane(ws)
+            tp.send({"type": "set_tier", "tier": "heavy"})
+            tp.chat("tô vàng chữ này", "word")
+    assert argv_value(fake.calls[0], "-m") == "heavy-x"
+    monkeypatch.setenv("HERMES_OFFICE_TIERING", "0")
+    fake2 = FakeHermes(env / "fake2", ["ok"])
+    run(fake2, monkeypatch, "word", "tô vàng chữ này")
+    assert argv_value(fake2.calls[0], "-m") == "core-x" and argv_value(fake2.calls[0], "--reasoning") is None
