@@ -52,6 +52,7 @@ RULES: List[Tuple[str, str, str]] = [
     ("excel", "excel-schedule-builder", r"(thoi khoa bieu|lich truc|lich lam viec|phan cong|xep lich|lich thi|lich hoc)"),
     ("excel", "excel-budget-planner", r"(chi tieu|ngan sach|thu chi|budget|quan ly tien|so quy)"),
     ("excel", "excel-dashboard", r"(tong quan|dashboard|bieu do|bao cao nhanh|thong ke|trang tong hop)"),
+    ("any", "office-smart-search-annotate", r"(tim (kiem|tat ca|giup|cac|nhung|het)|danh dau|to (mau|sang|noi bat|vang|do|xanh)|highlight|binh luan|comment|chu thich|ghi chu (bang )?mau)"),
     ("any", "office-qa-checklist", r"(kiem tra chat luong|ra soat chat luong|qa|checklist|tieu chuan trinh bay)"),
     ("any", "office-quick-actions", r"^(tom tat|viet lai|rut gon|doi giong|giai thich|dich).{0,12}(doan|dong|cau|vung chon|phan (nay|chon)|o nay|noi dung (nay|chon))"),
 ]

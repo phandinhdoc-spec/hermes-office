@@ -15,6 +15,18 @@ THEME = (
     "{background, surface, text, primary, accent, muted, fontHeading, fontBody}"
 )
 
+
+QUERY_HELP = (
+    "words to find, ignoring case and accents. Space = every word must appear; \"a b\" = phrase; a|b = either word (synonyms, e.g. học|hs sinh); "
+    "-word = exclude. Example: học|hs giỏi -lớp"
+)
+MODE_HELP = "all|any|phrase|regex (default all: every word; any: at least one; phrase: whole query as one phrase; regex: regular expression)"
+COLOR_HELP = "vàng|xanh lá|xanh dương|hồng|đỏ|cam|xám or #RRGGBB (default: yellow); none removes the marking"
+GROUPS_HELP = (
+    "colour-coded sets instead of one query: [{\"query\": ..., \"color\": ..., \"label\": \"short name\", \"comment\": ...}, ...] (max 8; "
+    "each may override mode/fuzzy/matchCase/wholeWord). Use it to colour categories differently"
+)
+
 EXTRA_TOOLS: Dict[str, Dict[str, Any]] = {
     # ---------------------------------------------------------------- PowerPoint
     "office_ppt_build_slide": {"host": "powerpoint", "args": {
@@ -96,4 +108,43 @@ EXTRA_TOOLS: Dict[str, Dict[str, Any]] = {
         "keyColumn": "0-based column that identifies a row (optional; without it rows are compared by position)", "limit": "max differences listed (default 100)"}},
     "office_excel_highlight_cells": {"host": "excel", "args": {
         "addresses": "string[] e.g. [\"B3\", \"D7:E7\"] (max 300)", "sheet": "name (optional)", "fillColor": HEX, "fontColor": HEX}},
+
+    # ---------------------------------------------------------------- smart search, colour marking, comments (annot_extra.ts)
+    "office_word_list_matches": {"host": "word", "args": {
+        "query": QUERY_HELP, "mode": MODE_HELP, "fuzzy": "bool: forgive typos in words of 5+ letters (default true)",
+        "matchCase": "bool (default false)", "wholeWord": "bool (default false)", "top_k": "1-100 (default 20)", "order": "score|document (default score)"}},
+    "office_word_mark_matches": {"host": "word", "args": {
+        "query": QUERY_HELP, "color": COLOR_HELP, "comment": "comment attached to the first match of every marked paragraph; {match} = the matched text (optional)",
+        "groups": GROUPS_HELP, "mode": MODE_HELP, "fuzzy": "bool (default true)", "matchCase": "bool", "wholeWord": "bool",
+        "bold": "bool (optional)", "fontColor": HEX + " (optional)", "max": "max paragraphs marked per group (default 50, max 200)", "commentMax": "max comments in total per group (default 20, max 60)"}},
+    "office_word_list_comments": {"host": "word", "args": {"contains": "filter by text (optional)", "author": "filter (optional)", "unresolvedOnly": "bool (optional)"}},
+    "office_word_delete_comments": {"host": "word", "args": {
+        "ids": "comment ids from office_word_list_comments", "contains": "text filter", "author": "author filter", "all": "bool: every comment", "action": "delete|resolve (default delete)"}},
+    "office_excel_list_matches": {"host": "excel", "args": {
+        "query": QUERY_HELP, "mode": MODE_HELP, "scope": "cell|row (default cell; row = the words may sit in different cells of the same row)",
+        "sheet": "name | all (default active sheet)", "address": "limit to a range (optional)", "inFormulas": "bool: also search formulas (default false)",
+        "fuzzy": "bool (default true)", "matchCase": "bool", "wholeWord": "bool", "top_k": "1-100 (default 30)", "order": "score|sheet (default score)"}},
+    "office_excel_mark_matches": {"host": "excel", "args": {
+        "query": QUERY_HELP, "color": COLOR_HELP, "comment": "comment/note put on every marked cell; {match} = the cell text (optional)", "kind": "comment|note (default comment)",
+        "groups": GROUPS_HELP, "scope": "cell|row (default cell)", "wholeRow": "bool: with scope=row, colour the whole row (default false)", "sheet": "name | all", "address": "limit to a range",
+        "mode": MODE_HELP, "fuzzy": "bool", "matchCase": "bool", "wholeWord": "bool", "bold": "bool", "fontColor": HEX, "max": "max cells per group (default 300, max 1000)", "commentMax": "max comments in total (default 20, max 100)"}},
+    "office_excel_add_comment": {"host": "excel", "args": {
+        "address": "one cell, e.g. B3", "addresses": "string[] of single cells (max 100; alternative to address)", "text": "comment text", "kind": "comment|note (default comment)",
+        "fill": COLOR_HELP + " (optional: also colour the cell)", "sheet": "name (optional)"}},
+    "office_excel_list_comments": {"host": "excel", "args": {"sheet": "name | all (default active sheet)", "contains": "text filter (optional)"}},
+    "office_excel_delete_comments": {"host": "excel", "args": {"address": "one cell", "contains": "text filter", "all": "bool", "kind": "comment|note (optional)", "sheet": "name | all"}},
+    "office_ppt_list_matches": {"host": "powerpoint", "args": {
+        "query": QUERY_HELP, "mode": MODE_HELP, "where": "all|slides|notes (default all)", "slideIndex": "number (optional, default every slide)",
+        "fuzzy": "bool", "matchCase": "bool", "wholeWord": "bool", "top_k": "1-100 (default 20)", "order": "score|slide (default score)"}},
+    "office_ppt_mark_matches": {"host": "powerpoint", "args": {
+        "query": QUERY_HELP, "color": COLOR_HELP.replace("; none removes the marking", "; none is not possible in PowerPoint"),
+        "how": "text|outline|fill|both (default text: matched words in the colour + bold; outline = the box border; fill = the box background; both = text + outline)",
+        "comment": "sticky note beside each marked box; {match} = matched text (optional)", "placement": "margin|onslide (default margin = off the slide, not shown or printed)",
+        "groups": GROUPS_HELP, "slideIndex": "number (optional)", "mode": MODE_HELP, "fuzzy": "bool", "matchCase": "bool", "wholeWord": "bool",
+        "fontColor": HEX + " (optional, overrides the text colour)", "max": "max boxes per group (default 60)", "author": "name shown in the note data (default Hermes)"}},
+    "office_ppt_add_comment": {"host": "powerpoint", "args": {
+        "text": "comment text", "slideIndex": "number (optional, default selected slide)", "shapeId": "string from office_ppt_list_shapes (optional: the note sits beside it and its border is coloured)",
+        "color": COLOR_HELP.replace("; none removes the marking", ""), "placement": "margin|onslide (default margin)", "markAnchor": "bool (default true)", "author": "string (optional)"}},
+    "office_ppt_list_comments": {"host": "powerpoint", "args": {"slideIndex": "number (optional)", "contains": "text filter (optional)"}},
+    "office_ppt_delete_comments": {"host": "powerpoint", "args": {"ids": "note ids from office_ppt_list_comments", "slideIndex": "number: every note on this slide", "contains": "text filter", "all": "bool"}},
 }

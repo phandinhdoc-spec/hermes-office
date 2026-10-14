@@ -2,6 +2,7 @@ import { pptExtraTools } from "./ppt_extra";
 import { wordExtraTools } from "./word_extra";
 import { excelExtraTools } from "./excel_extra";
 import { compatTools } from "./compat_extra";
+import { annotTools } from "./annot_extra";
 
 type Args = Record<string, any>;
 
@@ -12,4 +13,5 @@ export const extraTools: Record<string, (a: Args) => Promise<unknown>> = {
   ...pptExtraTools,
   ...wordExtraTools,
   ...excelExtraTools,
+  ...annotTools,
 };

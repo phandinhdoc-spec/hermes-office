@@ -16,7 +16,7 @@ def ts_tools(path: Path):
 
 def extra_ts():
     names = set()
-    for f in ("ppt_extra.ts", "word_extra.ts", "excel_extra.ts"):
+    for f in ("ppt_extra.ts", "word_extra.ts", "excel_extra.ts", "annot_extra.ts"):
         names |= ts_tools(SRC / "office" / f)
     return names
 

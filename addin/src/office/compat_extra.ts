@@ -133,7 +133,7 @@ export async function applyPalette(a: Args): Promise<unknown> {
     await ctx.sync();
     let touched = 0;
     for (let i = 0; i < slides.length; i++) {
-      const items = shapeSets[i].items.filter((s) => !/^Hermes-GhiChu/.test(s.name) && s.top < 600);
+      const items = shapeSets[i].items.filter((s) => !/^Hermes-(GhiChu|BinhLuan)/.test(s.name) && s.top < 600);
       const textual = items.filter((s) => /TextBox|GeometricShape|Placeholder/i.test(String(s.type)));
       textual.forEach((s) => {
         s.textFrame.textRange.load("text");
