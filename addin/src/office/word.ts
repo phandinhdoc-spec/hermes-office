@@ -36,13 +36,20 @@ export async function replaceSelection(text: string): Promise<void> {
 }
 
 /** Whole-body text; `getRange` in Word terms. */
+/** Long documents: cap what one read sends to the model. */
+const MAX_READ_CHARS = 60000;
+
 export async function getRange(which: "whole" | "selection" = "whole"): Promise<string> {
   requireHost("word");
   return Word.run(async (ctx) => {
     const range = which === "whole" ? ctx.document.body.getRange("Whole") : ctx.document.getSelection();
     range.load("text");
     await ctx.sync();
-    return range.text;
+    const t = range.text;
+    if (which === "whole" && t.length > MAX_READ_CHARS) {
+      return t.slice(0, MAX_READ_CHARS) + `\n\n[... cut: ${t.length} characters in total, only the first ${MAX_READ_CHARS} are shown. Work on the selection or ask the user which part to open.]`;
+    }
+    return t;
   });
 }
 

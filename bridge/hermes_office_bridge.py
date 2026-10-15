@@ -1151,6 +1151,7 @@ def _clean_sel(v: Any) -> Dict[str, Optional[str]]:
 
 CONSENT_LEVELS = ("read", "ask", "full")  # read-only / change the document only when the user agrees / full editing rights
 APPROVAL_TIMEOUT = 300.0
+MAX_TOOL_RESULT_CHARS = int(os.environ.get("HERMES_MAX_TOOL_RESULT", "60000"))
 
 
 def is_write_tool(tool: str) -> bool:
@@ -1414,7 +1415,10 @@ async def handle_chat(sess: Session, msg: Dict[str, Any]) -> None:
                     results.append({"tool": tool, "error": str(exc)})
                     trace.append({"tool": tool, "ok": False, "arg_keys": sorted(args)})
                     await sess.send({"type": "tool_result", "id": cid, "tool": tool, "ok": False, "result": str(exc)})
-            sess.history.append({"role": "tool", "content": json.dumps(results, ensure_ascii=False)})
+            payload = json.dumps(results, ensure_ascii=False)
+            if len(payload) > MAX_TOOL_RESULT_CHARS:  # heavy documents: never let one tool result flood the model
+                payload = payload[:MAX_TOOL_RESULT_CHARS] + f'... [cut: {len(payload)} characters in total; read a narrower range]'
+            sess.history.append({"role": "tool", "content": payload})
             await sess.send({"type": "delta", "id": cid, "text": "\n"})
         if finished and not sess.agent_mode and sess.last_target:  # learn in the background from the model that did the work
             learner.enqueue(sess.last_target[0], sess.last_target[1], host, str(msg.get("text", "")), trace)

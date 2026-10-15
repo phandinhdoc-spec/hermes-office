@@ -54,6 +54,7 @@ export async function getSlides(): Promise<SlideInfo[]> {
         let text: string | undefined;
         try {
           text = sh.textFrame.textRange.text;
+          if (text && text.length > 1500) text = text.slice(0, 1500) + " […]"; // keep very long text boxes from flooding the model
         } catch {
           text = undefined;
         }
