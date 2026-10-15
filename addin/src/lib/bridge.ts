@@ -28,7 +28,9 @@ export type BridgeEvent =
   | { type: "delta"; id: string; text: string }
   | { type: "tool_call"; id: string; tool: string; args: unknown }
   | { type: "tool_result"; id: string; tool: string; ok: boolean; result: unknown; direct?: boolean }
-  | { type: "models"; models: ModelOption[]; current: { model: string | null; provider: string | null }; selected: { model: string | null; provider: string | null }; agent_mode?: boolean }
+  | { type: "models"; models: ModelOption[]; current: { model: string | null; provider: string | null }; selected: { model: string | null; provider: string | null }; agent_mode?: boolean; consent?: "read" | "ask" | "full" | null }
+  | { type: "consent"; level: "read" | "ask" | "full" }
+  | { type: "approval_request"; id: string; chat_id?: string; tool: string; args: unknown }
   | { type: "backend_updated"; backend: string; ok: boolean; output?: string; message?: string }
   | { type: "skills"; skills: SkillInfo[]; active: string[] }
   | { type: "skills_active"; active: string[] }

@@ -171,3 +171,10 @@ hermes-office/
 ## 📝 Giấy phép & Đóng góp
 Phát triển dành cho hệ sinh thái **Hermes Agent**.
 Mọi đóng góp và báo lỗi xin vui lòng tạo Issue hoặc Pull Request trên GitHub.
+
+### Quyền, thư mục ẩn và tự dọn
+
+- Lần đầu mở, add-in hỏi một hộp thoại ba mức: **Chỉ đọc** / **Hỏi trước khi sửa** (mặc định gợi ý) / **Toàn quyền chỉnh sửa**. Lựa chọn lưu trong `office_model_selection.json`, đổi lại bằng nút 🛡.
+- Mức "Hỏi trước khi sửa": mọi công cụ làm thay đổi văn bản hiện hộp xác nhận; mức "Chỉ đọc" chặn hẳn. Mức "Toàn quyền" thêm `--dangerously-skip-permissions` cho `agy`. Claude luôn chạy `--tools ""`, mọi chỉnh sửa đi qua công cụ Office.
+- Mỗi phiên có thư mục ẩn riêng `~/.hermes-office/workspace/<phiên>/`. Khi đóng panel Office, sau `HERMES_CLEANUP_GRACE` giây (mặc định 30), bridge cho học nốt hàng đợi (`HERMES_CLEANUP_FLUSH`, mặc định 120 s) rồi xóa thư mục. Thư mục sót lại do máy tắt đột ngột được dọn sau 24 giờ khi bridge khởi động.
+- Văn bản đang mở được sửa trực tiếp qua Office.js, không có bản sao lưu.

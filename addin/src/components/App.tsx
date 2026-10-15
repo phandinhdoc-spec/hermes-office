@@ -1,3 +1,4 @@
+import { ConsentModal, ApprovalModal, type ConsentLevel, type ApprovalReq } from "./ConsentModal";
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
   BridgeClient,
@@ -31,7 +32,7 @@ import {
 import ToolsPanel from "./ToolsPanel";
 import TooltipHost from "./TooltipHost";
 import {
-  IconBolt, IconButton, IconCheck, IconChevron, IconCopy, IconEdit, IconFolder, IconInsert, IconPlus, IconRules, IconSelection, IconSend, IconSkills, IconStop, IconTools, IconTrash, IconX, Pill, StatusDot,
+  IconBolt, IconButton, IconCheck, IconChevron, IconCopy, IconEdit, IconFolder, IconInsert, IconPlus, IconRules, IconSelection, IconSend, IconShield, IconSkills, IconStop, IconTools, IconTrash, IconX, Pill, StatusDot,
 } from "./ui";
 
 /** The CLI's quiet mode appends a `session_id:` footer; never insert that into a document. */
@@ -99,6 +100,10 @@ export default function App() {
   const [modelCur, setModelCur] = useState<Sel | null>(null);
   const [modelSel, setModelSel] = useState<Sel | null>(null);
   const [agentMode, setAgentMode] = useState(false);
+  const [consent, setConsent] = useState<ConsentLevel | null>(null);
+  const [consentLoaded, setConsentLoaded] = useState(false);
+  const [consentOpen, setConsentOpen] = useState(false);
+  const [approval, setApproval] = useState<ApprovalReq | null>(null);
   const [skills, setSkills] = useState<SkillInfo[]>([]);
   const [activeSkills, setActiveSkills] = useState<string[]>([]);
   const [skillsOpen, setSkillsOpen] = useState(false);
@@ -208,6 +213,14 @@ export default function App() {
         setModelCur(e.current);
         setModelSel(e.selected);
         setAgentMode(!!e.agent_mode);
+        setConsent(e.consent ?? null);
+        setConsentLoaded(true);
+        break;
+      case "consent":
+        setConsent(e.level);
+        break;
+      case "approval_request":
+        setApproval({ id: e.id, tool: e.tool, args: e.args });
         break;
       case "skills":
         setSkills(e.skills);
@@ -352,6 +365,8 @@ export default function App() {
   const needAuth = agentMode && !!auth && (!auth.hermes.installed || !auth.logged_in); // Hermes login only matters in ⚡ mode
   const showAuth = needAuth && (authOpen || (!authDismissed && conn === "open"));
 
+  const saveConsent = (l: ConsentLevel) => { safeSend({ type: "set_consent", level: l }); setConsent(l); setConsentOpen(false); };
+  const answerApproval = (allow: boolean) => { if (approval) safeSend({ type: "approval_result", id: approval.id, allow }); setApproval(null); };
   const toggleAgentMode = () => safeSend({ type: "set_agent_mode", on: !agentMode });
   const selectModel = (m: ModelOption | null) => safeSend({ type: "set_model", model: m?.id ?? null, provider: m?.provider ?? null });
   const changeSkills = (names: string[]) => {
@@ -685,6 +700,7 @@ export default function App() {
         <IconButton tip={t("header.inline", { key: shortcutLabel })} onClick={() => void openInline()}><IconEdit /></IconButton>
         <IconButton tip={activeSkills.length ? t("header.skillsActive", { n: activeSkills.length }) : t("header.skills")} onClick={() => setSkillsOpen(true)} active={activeSkills.length > 0}><IconSkills /></IconButton>
         <IconButton tip={t("header.tools")} onClick={() => setTab(chat ? "tools" : "chat")} active={!chat}><IconTools /></IconButton>
+        <IconButton tip={t("consent.tip")} onClick={() => setConsentOpen(true)} active={consent === "full"}><IconShield /></IconButton>
         <IconButton tip={agentMode ? t("tb.agentOn") : t("tb.agentOff")} onClick={toggleAgentMode} active={agentMode} disabled={!!busy}><IconBolt /></IconButton>
         <span className="min-w-0 flex-1 truncate px-1.5 text-center text-[10.5px] text-gray-500">{(() => {
           const c = ws.chats.find((x) => x.id === ws.activeId);
@@ -780,6 +796,10 @@ export default function App() {
       </div>
 
       <TooltipHost />
+      {((consentLoaded && consent === null) || consentOpen) && (
+        <ConsentModal current={consent} onSave={saveConsent} onClose={consent === null ? undefined : () => setConsentOpen(false)} />
+      )}
+      {approval && <ApprovalModal req={approval} onAnswer={answerApproval} />}
       {confirmClear && (
         <div
           className="absolute inset-0 z-40 flex items-center justify-center bg-black/40 p-4"
