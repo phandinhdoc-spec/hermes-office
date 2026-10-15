@@ -15,7 +15,7 @@ interface Props {
 const key = (m: { id: string; provider: string | null }) => `${m.provider ?? ""}\u0000${m.id}`;
 
 /**
- * Empty selection = auto routing in the bridge (core model for chat, fast model for inline edits).
+ * Empty selection = auto routing in the bridge (one model, Gemini Flash by default, for chat and inline edits).
  * Rendered as a micro-pill + popover.
  */
 export default function ModelSelector({ models, selected, onSelect, up }: Props) {

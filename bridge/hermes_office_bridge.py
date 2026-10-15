@@ -76,8 +76,9 @@ CORE_MODEL = os.environ.get("HERMES_CORE_MODEL", "claude-3-5-sonnet") or None
 CORE_PROVIDER = os.environ.get("HERMES_CORE_PROVIDER") or None
 FAST_MODEL = os.environ.get("HERMES_FAST_MODEL", "gemini-3.8-flash") or None
 FAST_PROVIDER = os.environ.get("HERMES_FAST_PROVIDER") or None
-# Inline edits (F6) use the SAME model as chat. Set HERMES_INLINE_USE_FAST=1 to route Auto-mode inline edits to FAST_MODEL.
-INLINE_USE_FAST = os.environ.get("HERMES_INLINE_USE_FAST", "").lower() in ("1", "true", "yes")
+# Skills preloaded into every chat prompt (comma-separated). Everything else is opt-in from the Skills drawer.
+# Keep this short: each preloaded skill is sent with every request. Inline edits (F6) preload none.
+DEFAULT_SKILLS = [n.strip() for n in os.environ.get("HERMES_DEFAULT_SKILLS", "office-user-style").split(",") if n.strip()]
 # Official installers used by the in-extension setup flow (override with env vars; empty = unsupported).
 HERMES_INSTALL_URL = os.environ.get(
     "HERMES_INSTALL_URL", "https://raw.githubusercontent.com/NousResearch/hermes-agent/main/scripts/install.sh"
@@ -544,8 +545,9 @@ def list_models() -> Dict[str, Any]:
     if isinstance(mc, str):
         mc = {"default": mc}
     configured = {"model": mc.get("default") or mc.get("model"), "provider": mc.get("provider")}
-    # Auto routing: chat uses the core model; fall back to Hermes' own default if unset.
-    current = {"model": CORE_MODEL, "provider": CORE_PROVIDER} if CORE_MODEL else configured
+    # Auto routing: chat and inline edits share one model; fall back to Hermes' own default if unset.
+    auto = auto_target()
+    current = auto if auto["model"] else configured
     models: List[Dict[str, Any]] = []
     seen = set()
 
@@ -1059,13 +1061,23 @@ def font_pairs(vibe: Optional[str], platform: str) -> Dict[str, Any]:
 # --------------------------------------------------------------------------- sessions / RPC
 
 
-def route_model(sess: "Session", fast: bool = False) -> Dict[str, Optional[str]]:
-    """An explicit UI selection wins (chat and inline alike); in Auto mode the core model is used, and the fast model only for inline edits when HERMES_INLINE_USE_FAST is set."""
-    if sess.model:
-        return {"model": sess.model, "provider": sess.provider}
-    if fast and INLINE_USE_FAST and FAST_MODEL:
+def auto_target() -> Dict[str, Optional[str]]:
+    """Auto mode: ONE model for chat and inline edits alike (FAST_MODEL, i.e. Gemini Flash by default)."""
+    if FAST_MODEL:
         return {"model": FAST_MODEL, "provider": fast_provider()}
     return {"model": CORE_MODEL, "provider": CORE_PROVIDER}
+
+
+def route_model(sess: "Session", fast: bool = False) -> Dict[str, Optional[str]]:
+    """The model picked in the UI wins for chat and inline edits; Auto resolves to auto_target() for both."""
+    if sess.model:
+        return {"model": sess.model, "provider": sess.provider}
+    return auto_target()
+
+
+def effective_skills(sess: "Session") -> List[str]:
+    """Default Office skills plus whatever the user switched on, without duplicates."""
+    return list(dict.fromkeys(DEFAULT_SKILLS + sess.skills))
 
 
 def selection_path() -> Path:
@@ -1161,7 +1173,7 @@ async def handle_chat(sess: Session, msg: Dict[str, Any]) -> None:
 
             reply = await run_hermes(
                 build_prompt(host, sess.history, context, sess.rules), on_chunk,
-                skills=sess.skills, reasoning=sess.reasoning, **route_model(sess),
+                skills=effective_skills(sess), reasoning=sess.reasoning, **route_model(sess),
             )
             sess.history.append({"role": "assistant", "content": reply})
             blocks = TOOL_BLOCK_RE.findall(reply)
@@ -1218,7 +1230,7 @@ async def handle_inline(sess: Session, msg: Dict[str, Any]) -> None:
         await sess.send({"type": "delta", "id": cid, "text": t})
 
     try:
-        await run_hermes(prompt, on_chunk, skills=sess.skills, **route_model(sess, fast=True))
+        await run_hermes(prompt, on_chunk, **route_model(sess, fast=True))  # no skills: the style profile is already in the prompt
         await sess.send({"type": "done", "id": cid})
     except asyncio.CancelledError:
         await sess.send({"type": "done", "id": cid, "cancelled": True})
@@ -1252,7 +1264,7 @@ async def handle_run_toolset(sess: Session, msg: Dict[str, Any]) -> None:
     try:
         if not NAME_RE.match(toolset):
             raise ValueError(f"invalid toolset: {toolset!r}")
-        await run_hermes(str(msg.get("text", "")), on_chunk, skills=sess.skills, toolsets=toolset, reasoning=sess.reasoning,
+        await run_hermes(str(msg.get("text", "")), on_chunk, skills=effective_skills(sess), toolsets=toolset, reasoning=sess.reasoning,
                          **route_model(sess))
         await sess.send({"type": "done", "id": cid})
     except asyncio.CancelledError:

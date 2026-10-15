@@ -91,7 +91,7 @@ const en = {
   "model.fastDesc": "Quick interactive replies and inline edits",
   "model.section.recommended": "Recommended",
   "model.section.other": "Other models",
-  "model.autoNote": "Auto: Sonnet for chat, Gemini Flash for inline edits",
+  "model.autoNote": "Auto: Gemini Flash for both chat and inline edits",
 
   "skillsDrawer.title": "Skills",
   "skillsDrawer.active": "{n} active",
@@ -295,7 +295,7 @@ const vi: Record<Key, string> = {
   "model.fastDesc": "Phản hồi tương tác nhanh và sửa nhanh tại chỗ",
   "model.section.recommended": "Đề xuất",
   "model.section.other": "Mô hình khác",
-  "model.autoNote": "Tự động: Sonnet cho trò chuyện, Gemini Flash cho sửa nhanh",
+  "model.autoNote": "Tự động: Gemini Flash cho cả trò chuyện và sửa nhanh (F6)",
 
   "skillsDrawer.title": "Kỹ năng",
   "skillsDrawer.active": "đang bật {n}",
