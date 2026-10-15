@@ -106,11 +106,45 @@ def office_home() -> Path:
     return Path(os.environ.get("HERMES_OFFICE_HOME") or (Path.home() / ".hermes-office"))
 
 
-def workspace_dir() -> Path:
-    """Hidden working directory every backend call runs in (isolated from the user's own projects)."""
+def workspace_dir(sub: Optional[str] = None) -> Path:
+    """Hidden working directory every backend call runs in (isolated from the user's own projects).
+
+    `sub` is a per-Office-session subfolder; it is removed when that session ends (see remove_session_dir).
+    """
     p = office_home() / "workspace"
+    if sub:
+        p = p / re.sub(r"[^A-Za-z0-9_-]", "", sub)[:40]
     p.mkdir(parents=True, exist_ok=True)
     return p
+
+
+def remove_session_dir(sub: str) -> bool:
+    """Delete one session's hidden folder. Never touches anything outside <office_home>/workspace."""
+    name = re.sub(r"[^A-Za-z0-9_-]", "", sub)[:40]
+    if not name:
+        return False
+    target = office_home() / "workspace" / name
+    if not target.is_dir() or target.is_symlink():
+        return False
+    shutil.rmtree(target, ignore_errors=True)
+    return not target.exists()
+
+
+def sweep_stale(max_age: float = 24 * 3600, keep: Tuple[str, ...] = ()) -> List[str]:
+    """Remove leftover session folders (crash, power loss) older than `max_age` seconds."""
+    root = office_home() / "workspace"
+    gone: List[str] = []
+    if not root.is_dir():
+        return gone
+    now = time.time()
+    for d in root.iterdir():
+        try:
+            if d.is_dir() and not d.is_symlink() and d.name not in keep and now - d.stat().st_mtime > max_age:
+                shutil.rmtree(d, ignore_errors=True)
+                gone.append(d.name)
+        except OSError:
+            continue
+    return gone
 
 
 def child_env(base: Optional[Dict[str, str]] = None) -> Dict[str, str]:
@@ -414,7 +448,7 @@ def make_parser(backend: str):
 # --------------------------------------------------------------------------- command lines
 
 
-def build_cmd(p: Probe, model: Optional[str], prompt: str, conv: Optional[str], text_mode: bool) -> Tuple[List[str], Optional[str]]:
+def build_cmd(p: Probe, model: Optional[str], prompt: str, conv: Optional[str], text_mode: bool, yolo: bool = False) -> Tuple[List[str], Optional[str]]:
     """(argv, stdin text) for one headless turn, using only the flags this CLI install supports."""
     cmd: List[str]
     stdin: Optional[str] = None
@@ -433,6 +467,8 @@ def build_cmd(p: Probe, model: Optional[str], prompt: str, conv: Optional[str], 
             cmd += ["--print-timeout", os.environ.get("HERMES_AGY_PRINT_TIMEOUT", "900s")]
         if os.environ.get("HERMES_AGY_SANDBOX", "").lower() in ("1", "true", "yes") and p.has("--sandbox"):
             cmd += ["--sandbox"]
+        if yolo and p.has("--dangerously-skip-permissions"):  # only for the user's explicit "full rights" consent level
+            cmd += ["--dangerously-skip-permissions"]
         extra = os.environ.get("HERMES_AGY_FLAGS")
     else:
         cmd = [p.path, "-p"]  # prompt goes through stdin: no argv size limit, and it stays out of the process list
@@ -539,8 +575,9 @@ class TurnResult:
 
 
 async def _attempt(p: Probe, model: Optional[str], prompt: str, conv: Optional[str], text_mode: bool,
-                   on_chunk: Callable[[str], Awaitable[None]], env: Dict[str, str]) -> TurnResult:
-    cmd, stdin = build_cmd(p, model, prompt, conv, text_mode)
+                   on_chunk: Callable[[str], Awaitable[None]], env: Dict[str, str],
+                   yolo: bool = False, workdir: Optional[str] = None) -> TurnResult:
+    cmd, stdin = build_cmd(p, model, prompt, conv, text_mode, yolo)
     parser = make_parser(p.backend)
     out: List[str] = []
     stray: List[str] = []
@@ -549,7 +586,7 @@ async def _attempt(p: Probe, model: Optional[str], prompt: str, conv: Optional[s
         out.append(t)
         await on_chunk(t)
 
-    gen = _exec_lines(cmd, stdin, env, workspace_dir())
+    gen = _exec_lines(cmd, stdin, env, workspace_dir(workdir))
     try:
         async for line in gen:
             if text_mode:
@@ -607,7 +644,8 @@ def _friendly(exc: BackendError, backend: str, model: Optional[str], version: st
 
 
 async def run_turn(backend: str, model: Optional[str], full_prompt: str, delta_prompt: str, conv: Optional[str],
-                   on_chunk: Callable[[str], Awaitable[None]], env: Optional[Dict[str, str]] = None) -> TurnResult:
+                   on_chunk: Callable[[str], Awaitable[None]], env: Optional[Dict[str, str]] = None,
+                   yolo: bool = False, workdir: Optional[str] = None) -> TurnResult:
     """One chat turn. `full_prompt` starts a conversation; `delta_prompt` continues `conv`.
 
     On a version mismatch the CLI is re-probed and the call retried (max 2 retries), never with another model.
@@ -625,7 +663,7 @@ async def run_turn(backend: str, model: Optional[str], full_prompt: str, delta_p
         force = False
         prompt = delta_prompt if cur else full_prompt
         try:
-            res = await _attempt(probe, model, prompt, cur, text_mode, on_chunk, cenv)
+            res = await _attempt(probe, model, prompt, cur, text_mode, on_chunk, cenv, yolo, workdir)
             res.notes = notes
             if notes:
                 log.info("%s %s adapted: %s", backend, version, "; ".join(notes))

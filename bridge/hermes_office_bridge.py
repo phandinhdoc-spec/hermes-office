@@ -1149,6 +1149,16 @@ def _clean_sel(v: Any) -> Dict[str, Optional[str]]:
     return {"model": None, "provider": None}
 
 
+CONSENT_LEVELS = ("read", "ask", "full")  # read-only / change the document only when the user agrees / full editing rights
+APPROVAL_TIMEOUT = 300.0
+
+
+def is_write_tool(tool: str) -> bool:
+    """True for tools that change the open document (everything except readers and bridge-local helpers)."""
+    spec = TOOLS.get(tool) or {}
+    return spec.get("host") != "bridge" and "_get_" not in tool and "_list_" not in tool
+
+
 def load_prefs() -> Dict[str, Any]:
     """{"agent_mode": bool, "lean": {model, provider}, "hermes": {model, provider}}; the old flat file is the Hermes selection."""
     try:
@@ -1158,7 +1168,8 @@ def load_prefs() -> Dict[str, Any]:
     if not isinstance(d, dict):
         d = {}
     hermes = d.get("hermes") if "hermes" in d else ({"model": d.get("model"), "provider": d.get("provider")} if "model" in d else None)
-    return {"agent_mode": bool(d.get("agent_mode")), "lean": _clean_sel(d.get("lean")), "hermes": _clean_sel(hermes)}
+    consent = d.get("consent") if d.get("consent") in CONSENT_LEVELS else None  # None = the user has not answered the first-run dialog yet
+    return {"agent_mode": bool(d.get("agent_mode")), "lean": _clean_sel(d.get("lean")), "hermes": _clean_sel(hermes), "consent": consent}
 
 
 def save_prefs(prefs: Dict[str, Any]) -> None:
@@ -1188,6 +1199,37 @@ class Session:
         self.skills: List[str] = []
         self.reasoning: Optional[str] = None  # None = Hermes default (agent.reasoning_effort)
         self.rules: str = ""
+        self.consent: Optional[str] = self.prefs["consent"]
+        self.workdir: str = self.id  # hidden per-session folder under ~/.hermes-office/workspace
+
+    def set_consent(self, level: str) -> None:
+        self.consent = level
+        self.prefs["consent"] = level
+        save_prefs(self.prefs)
+
+    async def guard(self, cid: Optional[str], tool: str, args: Dict[str, Any], interactive: bool = True) -> None:
+        """Enforce the consent level before a document-changing tool runs; raises PermissionError when refused."""
+        if not is_write_tool(tool):
+            return
+        level = self.consent or "ask"  # no answer yet behaves like the middle level
+        if level == "full":
+            return
+        if level == "read":
+            raise PermissionError("Chế độ chỉ đọc: Hermes không được sửa văn bản. Bạn có thể đổi quyền trong cài đặt quyền (🛡).")
+        if not interactive:
+            raise PermissionError("Cần quyền sửa: đặt mức toàn quyền hoặc dùng khung chat để duyệt từng thay đổi.")
+        rid = uuid.uuid4().hex
+        fut: "asyncio.Future[Any]" = asyncio.get_running_loop().create_future()
+        self.pending[rid] = fut
+        try:
+            await self.send({"type": "approval_request", "id": rid, "chat_id": cid, "tool": tool, "args": args})
+            allowed = await asyncio.wait_for(fut, timeout=APPROVAL_TIMEOUT)
+        except asyncio.TimeoutError:
+            raise PermissionError("Hết thời gian chờ bạn đồng ý, thay đổi đã bị bỏ qua.") from None
+        finally:
+            self.pending.pop(rid, None)
+        if not allowed:
+            raise PermissionError("Bạn đã từ chối thay đổi này.")
 
     def reset_conversations(self) -> None:
         """Forget CLI-side conversations: the next turn replays history, rules and skills in one full prompt."""
@@ -1259,6 +1301,21 @@ class Session:
 sessions: Dict[str, Session] = {}
 
 
+async def end_session_cleanup(sess: Session) -> None:
+    """Office panel closed: let the learner finish (skills reach ~/.hermes/skills), then delete the hidden folder."""
+    try:
+        await asyncio.sleep(float(os.environ.get("HERMES_CLEANUP_GRACE", "30")))  # panel reloads reconnect within this time
+        if learner.enabled() and not sessions:  # nobody else is working: flush what was learned from this session
+            try:
+                await asyncio.wait_for(learner.flush(hermes_home() / "skills", learn_runner), timeout=float(os.environ.get("HERMES_CLEANUP_FLUSH", "120")))
+            except (asyncio.TimeoutError, Exception):  # noqa: BLE001
+                log.warning("learner flush before cleanup did not finish")
+        backends.remove_session_dir(sess.workdir)
+    except asyncio.CancelledError:
+        backends.remove_session_dir(sess.workdir)
+        raise
+
+
 async def lean_target(sess: "Session") -> Tuple[str, str]:
     """(backend, model) the lean engine uses. The model picked in the UI is pinned until the user changes it;
     Auto resolves to Gemini 3.8 Flash on agy."""
@@ -1275,7 +1332,8 @@ async def run_engine_chat(sess: "Session", host: str, context: Optional[str], on
     names = effective_skills(sess)
     full = build_prompt(host, sess.history, context, sess.rules, lean=True, skills_text=skills_block(names), learned=learned_index())
     delta = build_delta(sess.history[sess.sent.get(key, 0):], context)
-    res = await backends.run_turn(backend, model, full, delta, sess.conv.get(key), on_chunk, env=utf8_env())
+    res = await backends.run_turn(backend, model, full, delta, sess.conv.get(key), on_chunk, env=utf8_env(),
+                                  yolo=sess.consent == "full", workdir=sess.workdir)
     if res.conv_id:
         sess.conv[key] = res.conv_id
         sess.sent[key] = n + 1  # the assistant reply (index n) is already inside the CLI conversation
@@ -1314,7 +1372,7 @@ async def models_frame(sess: "Session") -> Dict[str, Any]:
         except backends.BackendError:
             current = {"model": None, "provider": None}
         data = {"models": models, "current": current}
-    return {"type": "models", **data, "selected": {"model": sess.model, "provider": sess.provider}, "agent_mode": sess.agent_mode}
+    return {"type": "models", **data, "selected": {"model": sess.model, "provider": sess.provider}, "agent_mode": sess.agent_mode, "consent": sess.consent}
 
 
 async def handle_chat(sess: Session, msg: Dict[str, Any]) -> None:
@@ -1347,6 +1405,7 @@ async def handle_chat(sess: Session, msg: Dict[str, Any]) -> None:
                     continue
                 await sess.send({"type": "tool_call", "id": cid, "tool": tool, "args": args})
                 try:
+                    await sess.guard(cid, tool, args)
                     res = await sess.rpc(tool, args)
                     results.append({"tool": tool, "result": res})
                     trace.append({"tool": tool, "ok": True, "arg_keys": sorted(args)})
@@ -1447,6 +1506,7 @@ async def handle_run_toolset(sess: Session, msg: Dict[str, Any]) -> None:
 
 @asynccontextmanager
 async def lifespan(_app: FastAPI):
+    backends.sweep_stale()  # leftovers of a crashed or killed earlier run
     task = asyncio.create_task(learner.worker(hermes_home() / "skills", learn_runner)) if learner.enabled() else None
     try:
         yield
@@ -1568,7 +1628,10 @@ async def http_rpc(tool: str, args: Optional[Dict[str, Any]] = None) -> Dict[str
         raise HTTPException(503, "no Office taskpane connected")
     sess = list(sessions.values())[-1]
     try:
+        await sess.guard(None, tool, args or {}, interactive=False)
         return {"result": await sess.rpc(tool, args or {})}
+    except PermissionError as exc:
+        raise HTTPException(403, str(exc))
     except asyncio.TimeoutError:
         raise HTTPException(504, "taskpane did not answer in time")
     except Exception as exc:  # noqa: BLE001
@@ -1664,6 +1727,12 @@ async def ws_endpoint(ws: WebSocket) -> None:
                     await sess.send({"type": "error", "message": f"cannot open browser: {exc}"})
             elif kind == "list_models":
                 await sess.send(await models_frame(sess))
+            elif kind == "set_consent":
+                if msg.get("level") in CONSENT_LEVELS:
+                    sess.set_consent(msg["level"])
+                    await sess.send({"type": "consent", "level": sess.consent})
+            elif kind == "approval_result":
+                sess.resolve({"id": msg.get("id"), "result": bool(msg.get("allow"))})
             elif kind == "set_agent_mode":
                 sess.set_agent_mode(bool(msg.get("on")))
                 await sess.send(await models_frame(sess))
@@ -1749,6 +1818,7 @@ async def ws_endpoint(ws: WebSocket) -> None:
     finally:
         sess.close()
         sessions.pop(sess.id, None)
+        asyncio.create_task(end_session_cleanup(sess))
 
 
 # Static add-in frontend (addin/dist). Registered last so API routes and /ws win.

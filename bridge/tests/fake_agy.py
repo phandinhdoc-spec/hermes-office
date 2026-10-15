@@ -12,6 +12,7 @@ if log:
 HELP = """Usage of agy:
   --conversation                  Resume a previous conversation by ID
   --model                         Model for the current CLI session
+  --dangerously-skip-permissions  Auto-approve all tool permission requests without prompting
   --output-format                 Output format for print mode (text, json, stream-json) (default text)
   --print-timeout                 Optional time limit for print mode
   -p                              Short alias for --print

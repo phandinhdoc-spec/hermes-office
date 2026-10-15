@@ -300,12 +300,19 @@ def due(items: List[Dict[str, Any]], now: Optional[float] = None) -> bool:
     return len(items) >= MIN_ITEMS or now - min(i["ts"] for i in items) > 6 * 3600
 
 
-async def tick(skills_root: Path, runner: Runner) -> Optional[Dict[str, Any]]:
-    """One scheduling step; returns the batch result when a learning pass ran."""
+async def tick(skills_root: Path, runner: Runner, force: bool = False) -> Optional[Dict[str, Any]]:
+    """One scheduling step; returns the batch result when a learning pass ran.
+
+    `force` skips the idle/minimum-items wait (used when Office closes) but still honours the daily cap.
+    """
     items = read_queue()
-    if not due(items):
-        return None
     now = time.time()
+    if force:
+        runs = [t for t in _read_state().get("runs", []) if now - t < 86400]
+        if not items or len(runs) >= MAX_PER_DAY:
+            return None
+    elif not due(items):
+        return None
     result = await run_batch(skills_root, runner, items)
     st = _read_state()
     st["runs"] = [t for t in st.get("runs", []) if now - t < 86400] + [now]
@@ -323,6 +330,13 @@ async def tick(skills_root: Path, runner: Runner) -> Optional[Dict[str, Any]]:
     if result["saved"]:
         log.info("learned skills: %s", ", ".join(result["saved"]))
     return result
+
+
+async def flush(skills_root: Path, runner: Runner) -> Optional[Dict[str, Any]]:
+    """Learn from everything queued right now (Office closed), so skills exist before the hidden folder is deleted."""
+    if not enabled():
+        return None
+    return await tick(skills_root, runner, force=True)
 
 
 async def worker(skills_root: Path, runner: Runner) -> None:

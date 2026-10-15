@@ -24,6 +24,7 @@ ENV = {
     "HERMES_AGY_BIN": str(HERE / "fake_agy.py"),
     "HERMES_CLAUDE_BIN": str(HERE / "fake_claude.py"),
     "FAKE_LOG": str(Path(TMP.name) / "calls.jsonl"),
+    "HERMES_CLEANUP_GRACE": "0",
     "HERMES_LEARN": "0",  # keep the background worker out of the way; learning is enqueued directly below
 }
 
@@ -49,12 +50,16 @@ class Bridge(unittest.TestCase):
         rows = [json.loads(l) for l in f.read_text().splitlines()] if f.exists() else []
         return [r for r in rows if r["argv"][:1] not in (["--help"], ["--version"], ["models"])]
 
-    def chat(self, ws, text, answer_rpc=True):
+    def chat(self, ws, text, answer_rpc=True, approve=True):
         ws.send_json({"type": "chat", "id": "c1", "host": "word", "text": text, "context": "selection: hello"})
         deltas, rpcs = [], []
+        self.approvals = []
         while True:
             m = ws.receive_json()
-            if m["type"] == "rpc_request":
+            if m["type"] == "approval_request":
+                self.approvals.append(m["tool"])
+                ws.send_json({"type": "approval_result", "id": m["id"], "allow": approve})
+            elif m["type"] == "rpc_request":
                 rpcs.append(m["tool"])
                 ws.send_json({"type": "rpc_result", "id": m["id"], "result": {"ok": True}})
             elif m["type"] == "delta":
@@ -157,6 +162,67 @@ class Bridge(unittest.TestCase):
             ws.send_json({"type": "set_model", "model": "claude-3-5-sonnet", "provider": "custom:x"})
             m = ws.receive_json()
             self.assertEqual(m["code"], "invalid_model")
+
+    def _tool_replies(self):
+        replies = Path(TMP.name) / "replies.json"
+        replies.write_text(json.dumps([TOOL1, TOOL2, "Xong."]), encoding="utf-8")
+        os.environ["FAKE_REPLIES"] = str(replies)
+        Path(str(replies) + ".idx").unlink(missing_ok=True)
+
+    def test_consent_read_only_blocks_writes(self):
+        self._tool_replies()
+        with TestClient(hb.app).websocket_connect("/ws") as ws:
+            ws.receive_json()
+            self.frame(ws, "set_model", model="sonnet", provider="claude")
+            ws.send_json({"type": "set_consent", "level": "read"})
+            self.assertEqual(ws.receive_json(), {"type": "consent", "level": "read"})
+            _, rpcs, done = self.chat(ws, "đậm")
+            self.assertEqual(done["type"], "done")
+            self.assertEqual(rpcs, ["office_word_get_selection"])  # reading is fine, formatting never reached Office
+            self.assertEqual(self.approvals, [])
+
+    def test_consent_ask_needs_approval(self):
+        self._tool_replies()
+        with TestClient(hb.app).websocket_connect("/ws") as ws:
+            ws.receive_json()
+            self.frame(ws, "set_model", model="sonnet", provider="claude")
+            ws.send_json({"type": "set_consent", "level": "ask"})
+            ws.receive_json()
+            _, rpcs, _ = self.chat(ws, "đậm", approve=False)
+            self.assertEqual(self.approvals, ["office_word_apply_format"])
+            self.assertEqual(rpcs, ["office_word_get_selection"])  # declined: not executed
+            self._tool_replies()
+            _, rpcs, _ = self.chat(ws, "đậm", approve=True)
+            self.assertEqual(rpcs, ["office_word_get_selection", "office_word_apply_format"])
+
+    def test_consent_full_runs_yolo_and_persists(self):
+        self._tool_replies()
+        with TestClient(hb.app).websocket_connect("/ws") as ws:
+            ws.receive_json()
+            ws.send_json({"type": "set_consent", "level": "full"})
+            ws.receive_json()
+            self.chat(ws, "chào")  # default auto = agy
+            self.assertIn("--dangerously-skip-permissions", self.calls()[0]["argv"])
+            self.frame(ws, "set_model", model="sonnet", provider="claude")
+            _, rpcs, _ = self.chat(ws, "đậm")
+            self.assertEqual(self.approvals, [])
+            self.assertEqual(len(rpcs), 2)
+        with TestClient(hb.app).websocket_connect("/ws") as ws:  # reopening Office keeps the answer
+            ws.receive_json()
+            self.assertEqual(self.frame(ws, "list_models")["consent"], "full")
+
+    def test_session_folder_removed_after_close(self):
+        ws_root = Path(os.environ["HERMES_OFFICE_HOME"]) / "workspace"
+        with TestClient(hb.app).websocket_connect("/ws") as ws:
+            ws.receive_json()
+            self.chat(ws, "chào")
+            self.assertTrue([d for d in ws_root.iterdir() if d.is_dir()])
+        import time
+        for _ in range(50):
+            if not [d for d in ws_root.iterdir() if d.is_dir()]:
+                break
+            time.sleep(0.1)
+        self.assertEqual([d for d in ws_root.iterdir() if d.is_dir()], [])
 
 
 if __name__ == "__main__":
