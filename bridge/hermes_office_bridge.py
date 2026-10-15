@@ -57,11 +57,15 @@ import tempfile
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from contextlib import asynccontextmanager
+from typing import Any, Dict, List, Optional, Tuple
 
 from fastapi import FastAPI, HTTPException, Request, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
+
+import backends
+import learner
 
 log = logging.getLogger("hermes-office-bridge")
 
@@ -152,6 +156,10 @@ LOCAL_TOOLS: Dict[str, Dict[str, Any]] = {
             "platform": "any|mac|windows (default any: fonts that ship with Office everywhere)",
         },
     },
+}
+LOCAL_TOOLS["office_skill_read"] = {
+    "host": "bridge",
+    "args": {"name": "skill name from the learned/active skills list; returns its instructions"},
 }
 TOOLS.update(LOCAL_TOOLS)
 
@@ -430,16 +438,66 @@ Available tools:
 """
 
 
+LEAN_NOTE = """Runtime: you run inside a headless CLI session. The CLI's own tools (shell, file editing, browsing, ...) are
+NOT available and must not be used; never read or write files on the machine. Everything you do to the document
+goes through office-tool blocks."""
+SKILL_EACH_MAX, SKILL_TOTAL_MAX, LEARNED_INDEX_MAX = 6000, 20000, 30
+
 REASONING_LEVELS = ("none", "minimal", "low", "medium", "high", "xhigh", "max", "ultra")  # `hermes chat --reasoning`
 RULES_MAX = 8000
 
 
-def build_prompt(host: str, history: List[Dict[str, str]], context: Optional[str], rules: str = "") -> str:
+def skills_block(names: List[str]) -> str:
+    """Bodies of the active skills for the first prompt of a conversation (size-capped)."""
+    parts: List[str] = []
+    total = 0
+    for n in names:
+        path = find_skill_file(n)
+        if not path:
+            continue
+        _, body = parse_frontmatter(_read_skill(path))
+        chunk = f"### Skill: {n}\n{body.strip()[:SKILL_EACH_MAX]}"
+        if total + len(chunk) > SKILL_TOTAL_MAX:
+            break
+        parts.append(chunk)
+        total += len(chunk)
+    return ("Active skills (follow them when relevant):\n\n" + "\n\n".join(parts) + "\n") if parts else ""
+
+
+def learned_index() -> str:
+    items = learner.learned_skills(hermes_home() / "skills")[:LEARNED_INDEX_MAX]
+    if not items:
+        return ""
+    lines = "\n".join(f"- {i['name']}: {i['description']}" for i in items)
+    return ("Learned skills (procedures saved from earlier successful tasks). When the task matches one, load it first with "
+            "the office_skill_read tool:\n" + lines + "\n")
+
+
+def build_delta(history: List[Dict[str, str]], context: Optional[str]) -> str:
+    """Only what the CLI-side conversation has not seen yet (new user message and/or tool results)."""
+    parts: List[str] = []
+    if context:
+        parts.append(f"Current Office context:\n{context}\n")
+    for m in history:
+        parts.append(f"[{m['role']}]\n{m['content']}")
+    parts.append("[assistant]")
+    return "\n\n".join(parts)
+
+
+def build_prompt(host: str, history: List[Dict[str, str]], context: Optional[str], rules: str = "",
+                 lean: bool = False, skills_text: str = "", learned: str = "") -> str:
     app = {"word": "Word", "excel": "Excel", "powerpoint": "PowerPoint"}.get(host, "Office")
     tools = "\n".join(
         f"- {name}({json.dumps(spec['args'])})" for name, spec in TOOLS.items() if spec["host"] in (host, "bridge") or host not in ("word", "excel", "powerpoint")
     )
-    parts = [SYSTEM_PREAMBLE.format(app=app, tools=tools), style_prompt_section(host)]
+    parts = [SYSTEM_PREAMBLE.format(app=app, tools=tools)]
+    if lean:
+        parts.append(LEAN_NOTE)
+    parts.append(style_prompt_section(host))
+    if skills_text:
+        parts.append(skills_text)
+    if learned:
+        parts.append(learned)
     if rules.strip():
         parts.append("User rules (always follow these, they override defaults):\n" + rules.strip()[:RULES_MAX] + "\n")
     if context:
@@ -1084,20 +1142,41 @@ def selection_path() -> Path:
     return hermes_home() / "office_model_selection.json"
 
 
-def load_selection() -> Dict[str, Optional[str]]:
+def _clean_sel(v: Any) -> Dict[str, Optional[str]]:
+    ok = lambda x: x is None or (isinstance(x, str) and bool(NAME_RE.match(x)))
+    if isinstance(v, dict) and ok(v.get("model")) and ok(v.get("provider")):
+        return {"model": v.get("model"), "provider": v.get("provider")}
+    return {"model": None, "provider": None}
+
+
+CONSENT_LEVELS = ("read", "ask", "full")  # read-only / change the document only when the user agrees / full editing rights
+APPROVAL_TIMEOUT = 300.0
+MAX_TOOL_RESULT_CHARS = int(os.environ.get("HERMES_MAX_TOOL_RESULT", "60000"))
+
+
+def is_write_tool(tool: str) -> bool:
+    """True for tools that change the open document (everything except readers and bridge-local helpers)."""
+    spec = TOOLS.get(tool) or {}
+    return spec.get("host") != "bridge" and "_get_" not in tool and "_list_" not in tool
+
+
+def load_prefs() -> Dict[str, Any]:
+    """{"agent_mode": bool, "lean": {model, provider}, "hermes": {model, provider}}; the old flat file is the Hermes selection."""
     try:
         d = json.loads(selection_path().read_text(encoding="utf-8"))
-        m, pr = d.get("model"), d.get("provider")
-        ok = lambda v: v is None or (isinstance(v, str) and NAME_RE.match(v))
-        return {"model": m, "provider": pr} if isinstance(d, dict) and ok(m) and ok(pr) else {"model": None, "provider": None}
     except (OSError, ValueError):
-        return {"model": None, "provider": None}
+        d = {}
+    if not isinstance(d, dict):
+        d = {}
+    hermes = d.get("hermes") if "hermes" in d else ({"model": d.get("model"), "provider": d.get("provider")} if "model" in d else None)
+    consent = d.get("consent") if d.get("consent") in CONSENT_LEVELS else None  # None = the user has not answered the first-run dialog yet
+    return {"agent_mode": bool(d.get("agent_mode")), "lean": _clean_sel(d.get("lean")), "hermes": _clean_sel(hermes), "consent": consent}
 
 
-def save_selection(model: Optional[str], provider: Optional[str]) -> None:
+def save_prefs(prefs: Dict[str, Any]) -> None:
     try:
         selection_path().parent.mkdir(parents=True, exist_ok=True)
-        selection_path().write_text(json.dumps({"model": model, "provider": provider}), encoding="utf-8")
+        selection_path().write_text(json.dumps(prefs), encoding="utf-8")
     except OSError:
         log.warning("cannot persist model selection")
 
@@ -1110,12 +1189,67 @@ class Session:
         self.pending: Dict[str, "asyncio.Future[Any]"] = {}
         self.tasks: Dict[str, "asyncio.Task[None]"] = {}
         self.send_lock = asyncio.Lock()
-        saved = load_selection()  # restore the last chosen model so reopening Office keeps it
-        self.model: Optional[str] = saved["model"]
-        self.provider: Optional[str] = saved["provider"]
+        self.prefs = load_prefs()  # restore ⚡ mode and the last chosen model of each mode so reopening Office keeps them
+        self.agent_mode: bool = self.prefs["agent_mode"]  # True = full Hermes agent (⚡); False = lean engine on agy/claude
+        sel = self.prefs["hermes" if self.agent_mode else "lean"]
+        self.model: Optional[str] = sel["model"]
+        self.provider: Optional[str] = sel["provider"]
+        self.conv: Dict[Tuple[str, str], str] = {}  # CLI-side conversation id per (backend, model)
+        self.sent: Dict[Tuple[str, str], int] = {}  # history entries already inside that conversation
+        self.last_target: Optional[Tuple[str, str]] = None
         self.skills: List[str] = []
         self.reasoning: Optional[str] = None  # None = Hermes default (agent.reasoning_effort)
         self.rules: str = ""
+        self.consent: Optional[str] = self.prefs["consent"]
+        self.workdir: str = self.id  # hidden per-session folder under ~/.hermes-office/workspace
+
+    def set_consent(self, level: str) -> None:
+        self.consent = level
+        self.prefs["consent"] = level
+        save_prefs(self.prefs)
+
+    async def guard(self, cid: Optional[str], tool: str, args: Dict[str, Any], interactive: bool = True) -> None:
+        """Enforce the consent level before a document-changing tool runs; raises PermissionError when refused."""
+        if not is_write_tool(tool):
+            return
+        level = self.consent or "ask"  # no answer yet behaves like the middle level
+        if level == "full":
+            return
+        if level == "read":
+            raise PermissionError("Chế độ chỉ đọc: Hermes không được sửa văn bản. Bạn có thể đổi quyền trong cài đặt quyền (🛡).")
+        if not interactive:
+            raise PermissionError("Cần quyền sửa: đặt mức toàn quyền hoặc dùng khung chat để duyệt từng thay đổi.")
+        rid = uuid.uuid4().hex
+        fut: "asyncio.Future[Any]" = asyncio.get_running_loop().create_future()
+        self.pending[rid] = fut
+        try:
+            await self.send({"type": "approval_request", "id": rid, "chat_id": cid, "tool": tool, "args": args})
+            allowed = await asyncio.wait_for(fut, timeout=APPROVAL_TIMEOUT)
+        except asyncio.TimeoutError:
+            raise PermissionError("Hết thời gian chờ bạn đồng ý, thay đổi đã bị bỏ qua.") from None
+        finally:
+            self.pending.pop(rid, None)
+        if not allowed:
+            raise PermissionError("Bạn đã từ chối thay đổi này.")
+
+    def reset_conversations(self) -> None:
+        """Forget CLI-side conversations: the next turn replays history, rules and skills in one full prompt."""
+        self.conv.clear()
+        self.sent.clear()
+
+    def select(self, model: Optional[str], provider: Optional[str]) -> None:
+        self.model, self.provider = model, provider
+        self.prefs["hermes" if self.agent_mode else "lean"] = {"model": model, "provider": provider}
+        save_prefs(self.prefs)
+        self.reset_conversations()  # a new model starts a fresh conversation that gets the whole history
+
+    def set_agent_mode(self, on: bool) -> None:
+        self.agent_mode = on
+        self.prefs["agent_mode"] = on
+        save_prefs(self.prefs)
+        sel = self.prefs["hermes" if on else "lean"]
+        self.model, self.provider = sel["model"], sel["provider"]
+        self.reset_conversations()
 
     async def send(self, msg: Dict[str, Any]) -> None:
         async with self.send_lock:
@@ -1130,6 +1264,13 @@ class Session:
             return save_style_profile(args.get("profile") or {})
         if tool == "office_design_palette":
             return build_palette(args.get("seed"), str(args.get("mood") or "balanced"), bool(args.get("dark")))
+        if tool == "office_skill_read":
+            name = str(args.get("name", "")).strip()
+            path = find_skill_file(name)
+            if not path:
+                raise ValueError(f"unknown skill: {name}")
+            _, body = parse_frontmatter(_read_skill(path))
+            return {"name": name, "instructions": body.strip()[:8000]}
         if tool == "office_design_font_pair":
             return font_pairs(args.get("vibe"), str(args.get("platform") or "any"))
         rid = uuid.uuid4().hex
@@ -1161,23 +1302,98 @@ class Session:
 sessions: Dict[str, Session] = {}
 
 
+async def end_session_cleanup(sess: Session) -> None:
+    """Office panel closed: let the learner finish (skills reach ~/.hermes/skills), then delete the hidden folder."""
+    try:
+        await asyncio.sleep(float(os.environ.get("HERMES_CLEANUP_GRACE", "30")))  # panel reloads reconnect within this time
+        if learner.enabled() and not sessions:  # nobody else is working: flush what was learned from this session
+            try:
+                await asyncio.wait_for(learner.flush(hermes_home() / "skills", learn_runner), timeout=float(os.environ.get("HERMES_CLEANUP_FLUSH", "120")))
+            except (asyncio.TimeoutError, Exception):  # noqa: BLE001
+                log.warning("learner flush before cleanup did not finish")
+        backends.remove_session_dir(sess.workdir)
+    except asyncio.CancelledError:
+        backends.remove_session_dir(sess.workdir)
+        raise
+
+
+async def lean_target(sess: "Session") -> Tuple[str, str]:
+    """(backend, model) the lean engine uses. The model picked in the UI is pinned until the user changes it;
+    Auto resolves to Gemini 3.8 Flash on agy."""
+    if sess.model and sess.provider in backends.BACKENDS:
+        return sess.provider, sess.model
+    m = await backends.auto_target()
+    return "agy", m["id"]
+
+
+async def run_engine_chat(sess: "Session", host: str, context: Optional[str], on_chunk) -> str:
+    backend, model = await lean_target(sess)
+    key = (backend, model)
+    n = len(sess.history)
+    names = effective_skills(sess)
+    full = build_prompt(host, sess.history, context, sess.rules, lean=True, skills_text=skills_block(names), learned=learned_index())
+    delta = build_delta(sess.history[sess.sent.get(key, 0):], context)
+    res = await backends.run_turn(backend, model, full, delta, sess.conv.get(key), on_chunk, env=utf8_env(),
+                                  yolo=sess.consent == "full", workdir=sess.workdir)
+    if res.conv_id:
+        sess.conv[key] = res.conv_id
+        sess.sent[key] = n + 1  # the assistant reply (index n) is already inside the CLI conversation
+    else:
+        sess.conv.pop(key, None)
+    sess.last_target = key
+    return res.text
+
+
+async def run_chat_turn(sess: "Session", host: str, context: Optional[str], on_chunk) -> str:
+    if sess.agent_mode:  # ⚡ on: the full Hermes agent, as before
+        return await run_hermes(
+            build_prompt(host, sess.history, context, sess.rules), on_chunk,
+            skills=effective_skills(sess), reasoning=sess.reasoning, **route_model(sess),
+        )
+    return await run_engine_chat(sess, host, context, on_chunk)
+
+
+async def learn_runner(backend: str, model: str, prompt: str) -> str:
+    """Learning passes run on the same backend/model that did the work."""
+    async def sink(_t: str) -> None:
+        return None
+
+    res = await backends.run_turn(backend, model, prompt, prompt, None, sink, env=utf8_env())
+    return res.text
+
+
+async def models_frame(sess: "Session") -> Dict[str, Any]:
+    if sess.agent_mode:
+        data = list_models()
+    else:
+        models = await backends.backend_models()
+        try:
+            auto = await backends.auto_target()
+            current: Dict[str, Optional[str]] = {"model": auto["id"], "provider": "agy"}
+        except backends.BackendError:
+            current = {"model": None, "provider": None}
+        data = {"models": models, "current": current}
+    return {"type": "models", **data, "selected": {"model": sess.model, "provider": sess.provider}, "agent_mode": sess.agent_mode, "consent": sess.consent}
+
+
 async def handle_chat(sess: Session, msg: Dict[str, Any]) -> None:
     cid = msg.get("id") or uuid.uuid4().hex
     host = msg.get("host", "")
     sess.history.append({"role": "user", "content": str(msg.get("text", ""))})
     context = msg.get("context")
+    trace: List[Dict[str, Any]] = []  # tool names + argument NAMES only (the learner never sees document content)
+    finished = False
+    learner.touch()
     try:
         for _ in range(MAX_TOOL_ROUNDS):
             async def on_chunk(t: str) -> None:
                 await sess.send({"type": "delta", "id": cid, "text": t})
 
-            reply = await run_hermes(
-                build_prompt(host, sess.history, context, sess.rules), on_chunk,
-                skills=effective_skills(sess), reasoning=sess.reasoning, **route_model(sess),
-            )
+            reply = await run_chat_turn(sess, host, context, on_chunk)
             sess.history.append({"role": "assistant", "content": reply})
             blocks = TOOL_BLOCK_RE.findall(reply)
             if not blocks:
+                finished = True
                 break
             results = []
             for raw in blocks:
@@ -1186,17 +1402,26 @@ async def handle_chat(sess: Session, msg: Dict[str, Any]) -> None:
                     tool, args = call["tool"], call.get("args") or {}
                 except (ValueError, KeyError, TypeError) as exc:
                     results.append({"error": f"invalid tool block: {exc}"})
+                    trace.append({"tool": "?", "ok": False, "arg_keys": []})
                     continue
                 await sess.send({"type": "tool_call", "id": cid, "tool": tool, "args": args})
                 try:
+                    await sess.guard(cid, tool, args)
                     res = await sess.rpc(tool, args)
                     results.append({"tool": tool, "result": res})
+                    trace.append({"tool": tool, "ok": True, "arg_keys": sorted(args)})
                     await sess.send({"type": "tool_result", "id": cid, "tool": tool, "ok": True, "result": res})
                 except Exception as exc:  # noqa: BLE001
                     results.append({"tool": tool, "error": str(exc)})
+                    trace.append({"tool": tool, "ok": False, "arg_keys": sorted(args)})
                     await sess.send({"type": "tool_result", "id": cid, "tool": tool, "ok": False, "result": str(exc)})
-            sess.history.append({"role": "tool", "content": json.dumps(results, ensure_ascii=False)})
+            payload = json.dumps(results, ensure_ascii=False)
+            if len(payload) > MAX_TOOL_RESULT_CHARS:  # heavy documents: never let one tool result flood the model
+                payload = payload[:MAX_TOOL_RESULT_CHARS] + f'... [cut: {len(payload)} characters in total; read a narrower range]'
+            sess.history.append({"role": "tool", "content": payload})
             await sess.send({"type": "delta", "id": cid, "text": "\n"})
+        if finished and not sess.agent_mode and sess.last_target:  # learn in the background from the model that did the work
+            learner.enqueue(sess.last_target[0], sess.last_target[1], host, str(msg.get("text", "")), trace)
         await sess.send({"type": "done", "id": cid})
     except asyncio.CancelledError:
         await sess.send({"type": "done", "id": cid, "cancelled": True})
@@ -1230,7 +1455,11 @@ async def handle_inline(sess: Session, msg: Dict[str, Any]) -> None:
         await sess.send({"type": "delta", "id": cid, "text": t})
 
     try:
-        await run_hermes(prompt, on_chunk, **route_model(sess, fast=True))  # no skills: the style profile is already in the prompt
+        if sess.agent_mode:
+            await run_hermes(prompt, on_chunk, **route_model(sess, fast=True))  # no skills: the style profile is already in the prompt
+        else:
+            backend, model = await lean_target(sess)
+            await backends.run_turn(backend, model, prompt, prompt, None, on_chunk, env=utf8_env())
         await sess.send({"type": "done", "id": cid})
     except asyncio.CancelledError:
         await sess.send({"type": "done", "id": cid, "cancelled": True})
@@ -1279,7 +1508,18 @@ async def handle_run_toolset(sess: Session, msg: Dict[str, Any]) -> None:
 
 # --------------------------------------------------------------------------- app
 
-app = FastAPI(title="hermes-office-bridge")
+@asynccontextmanager
+async def lifespan(_app: FastAPI):
+    backends.sweep_stale()  # leftovers of a crashed or killed earlier run
+    task = asyncio.create_task(learner.worker(hermes_home() / "skills", learn_runner)) if learner.enabled() else None
+    try:
+        yield
+    finally:
+        if task:
+            task.cancel()
+
+
+app = FastAPI(title="hermes-office-bridge", lifespan=lifespan)
 app.add_middleware(
     CORSMiddleware,
     allow_origin_regex=r"https?://(localhost|127\.0\.0\.1)(:\d+)?",
@@ -1314,6 +1554,30 @@ async def auth_google_route() -> Dict[str, Any]:
     return {"started": True}
 
 
+@app.get("/learned")
+async def learned_route() -> Dict[str, Any]:
+    return learner.status(hermes_home() / "skills")
+
+
+@app.delete("/learned/{name}")
+async def learned_delete_route(name: str) -> Dict[str, Any]:
+    if not learner.delete_learned(hermes_home() / "skills", name):
+        raise HTTPException(404, "no such learned skill")
+    return {"ok": True}
+
+
+@app.get("/backends")
+async def backends_route() -> Dict[str, Any]:
+    out: Dict[str, Any] = {}
+    for b in backends.BACKENDS:
+        try:
+            p = await backends.get_probe(b)
+            out[b] = {"installed": True, "path": p.path, "version": p.version or p.fingerprint, "denied_flags": sorted(p.denied)}
+        except backends.BackendError:
+            out[b] = {"installed": False}
+    return out
+
+
 @app.get("/tools")
 async def tools() -> Dict[str, Any]:
     return TOOLS
@@ -1321,7 +1585,7 @@ async def tools() -> Dict[str, Any]:
 
 @app.get("/models")
 async def models() -> Dict[str, Any]:
-    return list_models()
+    return {**list_models(), "backend_models": await backends.backend_models()}
 
 
 @app.get("/skills")
@@ -1368,7 +1632,10 @@ async def http_rpc(tool: str, args: Optional[Dict[str, Any]] = None) -> Dict[str
         raise HTTPException(503, "no Office taskpane connected")
     sess = list(sessions.values())[-1]
     try:
+        await sess.guard(None, tool, args or {}, interactive=False)
         return {"result": await sess.rpc(tool, args or {})}
+    except PermissionError as exc:
+        raise HTTPException(403, str(exc))
     except asyncio.TimeoutError:
         raise HTTPException(504, "taskpane did not answer in time")
     except Exception as exc:  # noqa: BLE001
@@ -1463,15 +1730,35 @@ async def ws_endpoint(ws: WebSocket) -> None:
                 except Exception as exc:  # noqa: BLE001
                     await sess.send({"type": "error", "message": f"cannot open browser: {exc}"})
             elif kind == "list_models":
-                await sess.send({"type": "models", **list_models(), "selected": {"model": sess.model, "provider": sess.provider}})
+                await sess.send(await models_frame(sess))
+            elif kind == "set_consent":
+                if msg.get("level") in CONSENT_LEVELS:
+                    sess.set_consent(msg["level"])
+                    await sess.send({"type": "consent", "level": sess.consent})
+            elif kind == "approval_result":
+                sess.resolve({"id": msg.get("id"), "result": bool(msg.get("allow"))})
+            elif kind == "set_agent_mode":
+                sess.set_agent_mode(bool(msg.get("on")))
+                await sess.send(await models_frame(sess))
+            elif kind == "backend_update":
+                target = str(msg.get("backend", ""))
+                try:
+                    if target not in backends.BACKENDS:
+                        raise ValueError("unknown backend")
+                    out = await backends.update_backend(target)
+                    await sess.send({"type": "backend_updated", "backend": target, "ok": True, "output": out})
+                    await sess.send(await models_frame(sess))
+                except Exception as exc:  # noqa: BLE001
+                    await sess.send({"type": "backend_updated", "backend": target, "ok": False, **error_frame(None, exc)})
             elif kind == "set_model":
                 model, provider = msg.get("model") or None, msg.get("provider") or None
                 if (model and not NAME_RE.match(model)) or (provider and not NAME_RE.match(provider)):
                     await sess.send({"type": "error", "message": "invalid model or provider", "code": "invalid_model"})
+                elif model and not sess.agent_mode and provider not in backends.BACKENDS:
+                    await sess.send({"type": "error", "message": "unknown backend for this model", "code": "invalid_model"})
                 else:
-                    sess.model, sess.provider = model, provider
-                    save_selection(model, provider)
-                    await sess.send({"type": "models", **list_models(), "selected": {"model": model, "provider": provider}})
+                    sess.select(model, provider)
+                    await sess.send(await models_frame(sess))
             elif kind == "list_skills":
                 try:
                     await sess.send({"type": "skills", "skills": await list_skills(), "active": sess.skills})
@@ -1488,6 +1775,7 @@ async def ws_endpoint(ws: WebSocket) -> None:
                 names = [str(n) for n in (msg.get("skills") or [])]
                 if all(NAME_RE.match(n) for n in names):
                     sess.skills = names
+                    sess.reset_conversations()  # skills ride in the first prompt of a conversation
                     await sess.send({"type": "skills_active", "active": names})
                 else:
                     await sess.send({"type": "error", "message": "invalid skill name", "code": "invalid_skill"})
@@ -1500,6 +1788,7 @@ async def ws_endpoint(ws: WebSocket) -> None:
                     await sess.send({"type": "reasoning", "level": lvl, "levels": list(REASONING_LEVELS)})
             elif kind == "set_rules":
                 sess.rules = str(msg.get("rules") or "")[:RULES_MAX]
+                sess.reset_conversations()
             elif kind == "create_skill":
                 try:
                     path = create_skill(str(msg.get("name", "")).strip(), str(msg.get("description", "")), str(msg.get("body", "")))
@@ -1518,8 +1807,10 @@ async def ws_endpoint(ws: WebSocket) -> None:
                     for m in (msg.get("messages") or [])[-200:]:
                         if isinstance(m, dict) and m.get("role") in ("user", "assistant") and isinstance(m.get("content"), str):
                             sess.history.append({"role": m["role"], "content": m["content"]})
+                    sess.reset_conversations()
             elif kind == "reset":
                 sess.history.clear()
+                sess.reset_conversations()
             elif kind == "rpc_result":
                 sess.resolve(msg)
             elif kind == "ping":
@@ -1531,6 +1822,7 @@ async def ws_endpoint(ws: WebSocket) -> None:
     finally:
         sess.close()
         sessions.pop(sess.id, None)
+        asyncio.create_task(end_session_cleanup(sess))
 
 
 # Static add-in frontend (addin/dist). Registered last so API routes and /ws win.

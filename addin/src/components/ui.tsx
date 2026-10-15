@@ -16,6 +16,8 @@ export const IconStop = ({ className = "h-3.5 w-3.5" }: IconProps) => (
   <svg viewBox="0 0 16 16" fill="currentColor" className={className} aria-hidden><rect x="4" y="4" width="8" height="8" rx="1.5" /></svg>
 );
 export const IconSkills = svg(<path d="M8 1.8 9.6 6l4.4.4-3.3 3 1 4.3L8 11.4 4.3 13.7l1-4.3-3.3-3L6.4 6 8 1.8Z" />);
+export const IconBolt = svg(<path d="M9 1.8 3.8 9h3.6L7 14.2 12.2 7H8.6L9 1.8Z" />);
+export const IconShield = svg(<path d="M8 1.8 3 3.6v4c0 3 2 5 5 6.6 3-1.6 5-3.6 5-6.6v-4L8 1.8Z" />);
 export const IconEdit = svg(<><path d="M10.5 2.5 13.5 5.5 5.5 13.5H2.5v-3l8-8Z" /><path d="m9 4 3 3" /></>);
 export const IconTools = svg(<path d="M9.5 3.2a3 3 0 0 0 3.3 3.9L7 12.9a1.6 1.6 0 0 1-2.3-2.3L10.5 4.8M9.5 3.2l1.7 1.7" />);
 export const IconTrash = svg(<path d="M3 4.5h10M6.5 4.5V3h3v1.5M4.5 4.5l.5 8h6l.5-8" />);

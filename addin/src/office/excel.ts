@@ -5,6 +5,28 @@ export interface RangeData {
   address: string;
   values: unknown[][];
   formulas: unknown[][];
+  /** Set when a big range was cut to the first rows: ask again with a narrower address to see the rest. */
+  truncated?: boolean;
+  totalRows?: number;
+  totalColumns?: number;
+}
+
+/** Heavy workbooks: never pull more than this many cells through the add-in/WebSocket/model in one read. */
+const MAX_READ_CELLS = 4000;
+
+/** Load a range's values and formulas, cutting it to the first rows when it is larger than MAX_READ_CELLS. */
+async function readCapped(ctx: Excel.RequestContext, range: Excel.Range, sheetName: string): Promise<RangeData> {
+  range.load(["address", "rowCount", "columnCount"]);
+  await ctx.sync();
+  const rows = range.rowCount;
+  const cols = Math.max(1, range.columnCount);
+  const keep = Math.max(1, Math.floor(MAX_READ_CELLS / cols));
+  const part = rows > keep ? range.getRow(0).getResizedRange(keep - 1, 0) : range;
+  part.load(["address", "values", "formulas"]);
+  await ctx.sync();
+  const data: RangeData = { sheet: sheetName, address: part.address, values: part.values, formulas: part.formulas };
+  if (rows > keep) Object.assign(data, { truncated: true, totalRows: rows, totalColumns: cols, address: part.address + ` (of ${range.address})` });
+  return data;
 }
 
 export async function getActiveSheet(): Promise<{ name: string; usedRange: RangeData | null }> {
@@ -13,14 +35,9 @@ export async function getActiveSheet(): Promise<{ name: string; usedRange: Range
     const sheet = ctx.workbook.worksheets.getActiveWorksheet();
     sheet.load("name");
     const used = sheet.getUsedRangeOrNullObject(true);
-    used.load(["address", "values", "formulas"]);
+    used.load("address");
     await ctx.sync();
-    return {
-      name: sheet.name,
-      usedRange: used.isNullObject
-        ? null
-        : { sheet: sheet.name, address: used.address, values: used.values, formulas: used.formulas },
-    };
+    return { name: sheet.name, usedRange: used.isNullObject ? null : await readCapped(ctx, used, sheet.name) };
   });
 }
 
@@ -31,9 +48,8 @@ export async function getRange(address?: string): Promise<RangeData> {
     const sheet = ctx.workbook.worksheets.getActiveWorksheet();
     const range = address ? sheet.getRange(address) : ctx.workbook.getSelectedRange();
     sheet.load("name");
-    range.load(["address", "values", "formulas"]);
     await ctx.sync();
-    return { sheet: sheet.name, address: range.address, values: range.values, formulas: range.formulas };
+    return readCapped(ctx, range, sheet.name);
   });
 }
 
