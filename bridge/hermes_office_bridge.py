@@ -76,6 +76,8 @@ CORE_MODEL = os.environ.get("HERMES_CORE_MODEL", "claude-3-5-sonnet") or None
 CORE_PROVIDER = os.environ.get("HERMES_CORE_PROVIDER") or None
 FAST_MODEL = os.environ.get("HERMES_FAST_MODEL", "gemini-3.8-flash") or None
 FAST_PROVIDER = os.environ.get("HERMES_FAST_PROVIDER") or None
+# Inline edits (F6) use the SAME model as chat. Set HERMES_INLINE_USE_FAST=1 to route Auto-mode inline edits to FAST_MODEL.
+INLINE_USE_FAST = os.environ.get("HERMES_INLINE_USE_FAST", "").lower() in ("1", "true", "yes")
 # Official installers used by the in-extension setup flow (override with env vars; empty = unsupported).
 HERMES_INSTALL_URL = os.environ.get(
     "HERMES_INSTALL_URL", "https://raw.githubusercontent.com/NousResearch/hermes-agent/main/scripts/install.sh"
@@ -1058,12 +1060,34 @@ def font_pairs(vibe: Optional[str], platform: str) -> Dict[str, Any]:
 
 
 def route_model(sess: "Session", fast: bool = False) -> Dict[str, Optional[str]]:
-    """An explicit UI selection wins; otherwise core for chat and fast for interactive inline edits."""
+    """An explicit UI selection wins (chat and inline alike); in Auto mode the core model is used, and the fast model only for inline edits when HERMES_INLINE_USE_FAST is set."""
     if sess.model:
         return {"model": sess.model, "provider": sess.provider}
-    if fast and FAST_MODEL:
+    if fast and INLINE_USE_FAST and FAST_MODEL:
         return {"model": FAST_MODEL, "provider": fast_provider()}
     return {"model": CORE_MODEL, "provider": CORE_PROVIDER}
+
+
+def selection_path() -> Path:
+    return hermes_home() / "office_model_selection.json"
+
+
+def load_selection() -> Dict[str, Optional[str]]:
+    try:
+        d = json.loads(selection_path().read_text(encoding="utf-8"))
+        m, pr = d.get("model"), d.get("provider")
+        ok = lambda v: v is None or (isinstance(v, str) and NAME_RE.match(v))
+        return {"model": m, "provider": pr} if isinstance(d, dict) and ok(m) and ok(pr) else {"model": None, "provider": None}
+    except (OSError, ValueError):
+        return {"model": None, "provider": None}
+
+
+def save_selection(model: Optional[str], provider: Optional[str]) -> None:
+    try:
+        selection_path().parent.mkdir(parents=True, exist_ok=True)
+        selection_path().write_text(json.dumps({"model": model, "provider": provider}), encoding="utf-8")
+    except OSError:
+        log.warning("cannot persist model selection")
 
 
 class Session:
@@ -1074,8 +1098,9 @@ class Session:
         self.pending: Dict[str, "asyncio.Future[Any]"] = {}
         self.tasks: Dict[str, "asyncio.Task[None]"] = {}
         self.send_lock = asyncio.Lock()
-        self.model: Optional[str] = None
-        self.provider: Optional[str] = None
+        saved = load_selection()  # restore the last chosen model so reopening Office keeps it
+        self.model: Optional[str] = saved["model"]
+        self.provider: Optional[str] = saved["provider"]
         self.skills: List[str] = []
         self.reasoning: Optional[str] = None  # None = Hermes default (agent.reasoning_effort)
         self.rules: str = ""
@@ -1433,6 +1458,7 @@ async def ws_endpoint(ws: WebSocket) -> None:
                     await sess.send({"type": "error", "message": "invalid model or provider", "code": "invalid_model"})
                 else:
                     sess.model, sess.provider = model, provider
+                    save_selection(model, provider)
                     await sess.send({"type": "models", **list_models(), "selected": {"model": model, "provider": provider}})
             elif kind == "list_skills":
                 try:
