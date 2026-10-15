@@ -175,6 +175,6 @@ Mọi đóng góp và báo lỗi xin vui lòng tạo Issue hoặc Pull Request t
 ### Quyền, thư mục ẩn và tự dọn
 
 - Lần đầu mở, add-in hỏi một hộp thoại ba mức: **Chỉ đọc** / **Hỏi trước khi sửa** (mặc định gợi ý) / **Toàn quyền chỉnh sửa**. Lựa chọn lưu trong `office_model_selection.json`, đổi lại bằng nút 🛡.
-- Mức "Hỏi trước khi sửa": mọi công cụ làm thay đổi văn bản hiện hộp xác nhận; mức "Chỉ đọc" chặn hẳn. Mức "Toàn quyền" thêm `--dangerously-skip-permissions` cho `agy`. Claude luôn chạy `--tools ""`, mọi chỉnh sửa đi qua công cụ Office.
+- Mức "Hỏi trước khi sửa": mọi công cụ làm thay đổi văn bản hiện hộp xác nhận; mức "Chỉ đọc" chặn hẳn. Mức "Toàn quyền" thêm `--dangerously-skip-permissions` cho `agy`. Claude luôn chạy `--tools ""`, mọi chỉnh sửa đi qua công cụ Office. Đã thử trên máy thật: `agy -p` không có cờ yolo thì tự từ chối mọi lệnh ghi của công cụ gốc (chỉ cho phép lệnh đọc như `ls`); khi đó bridge báo `backend_tool_denied` thay vì trả lời rỗng. `--mode plan` làm model chờ duyệt kế hoạch nên không dùng.
 - Mỗi phiên có thư mục ẩn riêng `~/.hermes-office/workspace/<phiên>/`. Khi đóng panel Office, sau `HERMES_CLEANUP_GRACE` giây (mặc định 30), bridge cho học nốt hàng đợi (`HERMES_CLEANUP_FLUSH`, mặc định 120 s) rồi xóa thư mục. Thư mục sót lại do máy tắt đột ngột được dọn sau 24 giờ khi bridge khởi động.
 - Văn bản đang mở được sửa trực tiếp qua Office.js, không có bản sao lưu.

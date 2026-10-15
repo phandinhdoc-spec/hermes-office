@@ -93,6 +93,14 @@ class AgyTests(Base):
         self.assertEqual(cm.exception.code, "backend_model")
         self.assertEqual(len(self.calls()), 1)  # no retry, no other model tried
 
+    async def test_native_tool_denied_is_reported_not_retried(self):
+        os.environ["FAKE_MODE"] = "denied"
+        with self.assertRaises(b.BackendError) as cm:
+            await self.turn("agy", "gemini-3.8-flash-medium")
+        self.assertEqual(cm.exception.code, "backend_tool_denied")
+        self.assertIn("RunCommand", str(cm.exception))
+        self.assertEqual(len(self.calls()), 1)  # no pointless retry in plain-text mode
+
     async def test_auth_error(self):
         os.environ["FAKE_MODE"] = "auth"
         with self.assertRaises(b.BackendError) as cm:

@@ -375,6 +375,7 @@ class AgyParser:
         self.final = ""
         self.done = False
         self.error: Optional[str] = None
+        self.denied: List[str] = []  # native tools agy tried to use and headless mode auto-denied
 
     def feed(self, obj: Dict[str, Any]) -> str:
         ev = obj.get("event")
@@ -395,6 +396,7 @@ class AgyParser:
             self.conv = r.get("conversation_id") or self.conv
             self.final = str(r.get("response") or "")
             self.done = True
+            self.denied = [str(d.get("display_name") or d.get("action") or "?") for d in (r.get("denied_actions") or []) if isinstance(d, dict)]
             if r.get("status") not in (None, "SUCCESS"):
                 self.error = str(r.get("error") or r.get("message") or f"agy status {r.get('status')}")
         return ""
@@ -611,6 +613,9 @@ async def _attempt(p: Probe, model: Optional[str], prompt: str, conv: Optional[s
         raise BackendError(parser.error, kind=classify(parser.error), detail=parser.error, cmd=cmd)
     if not parser.done:
         raise BackendError("CLI kết thúc mà không trả kết quả", kind="empty", detail="".join(stray)[-800:], cmd=cmd)
+    denied = getattr(parser, "denied", [])
+    if denied and not parser.final.strip() and not "".join(out).strip():
+        raise BackendError("agy đã thử dùng công cụ gốc nhưng bị từ chối", kind="denied", detail=", ".join(denied), cmd=cmd)
     if not out and parser.final:
         await emit(parser.final)  # no deltas were streamed: deliver the final text once
     return TurnResult("".join(out), parser.conv or conv, getattr(parser, "model", None))
@@ -637,6 +642,10 @@ def _friendly(exc: BackendError, backend: str, model: Optional[str], version: st
     if exc.kind == "model":
         msg = f"Model `{model}` không dùng được với {backend} {v}. Hãy chọn model khác trong danh sách. ({exc.detail[:300]})"
         return BackendError(msg, kind="model", code="backend_model", detail=exc.detail)
+    if exc.kind == "denied":
+        msg = (f"{backend} đã cố dùng công cụ gốc ({exc.detail}) thay vì công cụ Office, và bị từ chối nên không có câu trả lời. "
+               "Hãy gửi lại hoặc diễn đạt rõ hơn việc cần làm trong văn bản.")
+        return BackendError(msg, kind="denied", code="backend_tool_denied", detail=exc.detail)
     if adapted:
         msg = f"{backend} {v} vẫn lỗi sau khi tự điều chỉnh theo phiên bản: {exc.detail[:500]}"
         return BackendError(msg, kind=exc.kind, code="backend_adapt_failed", detail=exc.detail)

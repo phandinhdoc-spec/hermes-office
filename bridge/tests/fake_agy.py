@@ -43,6 +43,12 @@ if mode == "auth":
 prompt = opt("-p")
 if mode == "plain" or opt("--output-format") != "stream-json":
     print("Chào (text)"); sys.exit(0)
+if mode == "denied":  # real behaviour: headless mode auto-denies a native write tool and returns an empty reply
+    cid = conv or "cd48b78d-8c62-4d33-be59-76d0b7fcf132"
+    print(json.dumps({"event": "init", "conversation_id": cid, "init": {"cwd": os.getcwd(), "tools": ["run_command"], "permission_mode": "request-review"}}))
+    print("jetski: no output produced — a tool required the \"command\" permission that headless mode cannot prompt for, so it was auto-denied.")
+    print(json.dumps({"event": "result", "result": {"conversation_id": cid, "status": "SUCCESS", "response": "", "num_turns": 1, "denied_actions": [{"action": "command", "display_name": "RunCommand"}]}}))
+    sys.exit(0)
 cid = conv or "cd48b78d-8c62-4d33-be59-76d0b7fcf132"
 print(json.dumps({"event": "init", "conversation_id": cid, "init": {"cwd": os.getcwd(), "tools": ["run_command"], "permission_mode": "request-review"}}))
 print(json.dumps({"event": "step_update", "step_update": {"conversation_id": cid, "step_index": 0, "state": "DONE", "step_type": "user_input"}}))
