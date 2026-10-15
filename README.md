@@ -29,6 +29,37 @@ Extension / Add-in cho Microsoft Office (**Word**, **Excel**, **PowerPoint**) k�
 
 ---
 
+## ⚡ Chế độ nhanh, backend `agy` / `claude` và học nền
+
+Mặc định extension **không** chạy Hermes Agent đầy đủ (chậm). Mỗi lượt chat hoặc `F6` chạy thẳng CLI của model bạn chọn, trong một thư mục ẩn `~/.hermes-office/workspace`:
+
+| Model | Chạy qua | Ví dụ |
+|---|---|---|
+| Danh sách của `agy models` | `agy` (Antigravity CLI) | Gemini 3.8 Flash, Sonnet/Opus của agy |
+| Sonnet / Opus / Haiku (Claude) | `claude` (Claude Code CLI) | `sonnet`, `opus`, `haiku` |
+
+- **Model được khóa theo phiên**: chọn model nào thì chat và F6 đều dùng đúng model đó, kể cả sau khi đóng/mở Office. Lỗi chỉ được báo, không tự chuyển sang model khác.
+- **Auto** = Gemini 3.8 Flash qua `agy` (mặc định mức `medium`; đổi bằng `HERMES_AUTO_MODEL_PREFIX`, `HERMES_AUTO_EFFORT`).
+- **Nút ⚡ trên thanh công cụ**: bật để dùng Hermes Agent đầy đủ như trước (chậm hơn, nhiều tính năng). Tắt (mặc định) là chế độ nhanh. Mỗi chế độ nhớ model đã chọn riêng.
+- **Tự thích ứng theo phiên bản CLI**: bridge dò `--version`/`--help` của `agy` và `claude`, chỉ dùng cờ lệnh máy bạn hỗ trợ. Nếu gọi lỗi do lệch phiên bản (cờ bị đổi/bỏ, đầu ra khác, mã hội thoại hết hạn), nó dò lại và thử lại tối đa 2 lần, rồi mới báo lỗi. Cập nhật CLI chỉ khi bạn chủ động (`{"type":"backend_update","backend":"agy"}`).
+- **Giữ an toàn & chi phí**: CLI chạy không công cụ gốc (không shell, không sửa file; `claude` chạy với `--tools ""`, không MCP/plugin của bạn), không bật yolo. Các khóa API (`ANTHROPIC_API_KEY`, `GEMINI_API_KEY`, ...) bị loại khỏi môi trường con để chỉ dùng gói đăng nhập; đặt `HERMES_ALLOW_API_KEYS=1` nếu muốn giữ.
+- **Skill**: chỉ `office-user-style` được nạp sẵn (`HERMES_DEFAULT_SKILLS`); skill khác nạp khi bạn bật trong ngăn Skills. F6 không nạp skill nào.
+- **Học nền (không hỏi, không cần mở Office)**: sau tác vụ nhiều bước thành công, bridge ghi hàng đợi chỉ gồm *yêu cầu đã lọc + tên công cụ + tên tham số* (không có nội dung tài liệu). Khi máy rảnh, chính model/backend đã làm việc rút quy trình thành `~/.hermes/skills/learned-<tên>/SKILL.md` (Hermes tự nhận). Giới hạn: tối đa 6 lần học/ngày, 30 skill, mỗi lần ghi đè đều có bản sao lưu ở `~/.hermes-office/learned_backup/`. Xem `GET /learned`, xóa `DELETE /learned/<tên>`. Tắt hẳn bằng `HERMES_LEARN=0`.
+
+| Biến môi trường | Ý nghĩa |
+|---|---|
+| `HERMES_AGY_BIN`, `HERMES_CLAUDE_BIN` | Đường dẫn tới `agy` / `claude` nếu không nằm trong PATH |
+| `HERMES_AGY_FLAGS`, `HERMES_CLAUDE_FLAGS` | Cờ lệnh thêm cho từng CLI |
+| `HERMES_AGY_SANDBOX=1` | Chạy `agy --sandbox` |
+| `HERMES_CLAUDE_MODELS` | Danh sách bí danh model Claude, ví dụ `sonnet,opus` |
+| `HERMES_BACKEND_IDLE` | Số giây im lặng trước khi hủy một lượt gọi (mặc định 300) |
+| `HERMES_OFFICE_HOME` | Thư mục dữ liệu (mặc định `~/.hermes-office`) |
+| `HERMES_LEARN_MIN_ITEMS`, `HERMES_LEARN_MAX_PER_DAY`, `HERMES_LEARN_IDLE` | Điều tiết việc học nền |
+
+Chẩn đoán: `GET /backends` cho biết phiên bản `agy`/`claude` đang dò được và cờ lệnh đã bị loại. Kiểm thử bằng CLI giả: `python3 -m unittest discover -s bridge/tests`.
+
+---
+
 ## 🚀 Cài đặt nhanh (Quick Start)
 
 > 👉 **Người dùng không rành máy tính:** xem [`HDSD_CAI_DAT.md`](HDSD_CAI_DAT.md) — chỉ cần nhấp đúp `install.bat` (Windows) hoặc `install.command` (macOS). Script tự hỏi, tự tải Hermes Agent / Antigravity, rồi bạn **đăng nhập Gmail ngay trong tiện ích**.

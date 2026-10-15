@@ -31,7 +31,7 @@ import {
 import ToolsPanel from "./ToolsPanel";
 import TooltipHost from "./TooltipHost";
 import {
-  IconButton, IconCheck, IconChevron, IconCopy, IconEdit, IconFolder, IconInsert, IconPlus, IconRules, IconSelection, IconSend, IconSkills, IconStop, IconTools, IconTrash, IconX, Pill, StatusDot,
+  IconBolt, IconButton, IconCheck, IconChevron, IconCopy, IconEdit, IconFolder, IconInsert, IconPlus, IconRules, IconSelection, IconSend, IconSkills, IconStop, IconTools, IconTrash, IconX, Pill, StatusDot,
 } from "./ui";
 
 /** The CLI's quiet mode appends a `session_id:` footer; never insert that into a document. */
@@ -98,6 +98,7 @@ export default function App() {
   const [models, setModels] = useState<ModelOption[]>([]);
   const [modelCur, setModelCur] = useState<Sel | null>(null);
   const [modelSel, setModelSel] = useState<Sel | null>(null);
+  const [agentMode, setAgentMode] = useState(false);
   const [skills, setSkills] = useState<SkillInfo[]>([]);
   const [activeSkills, setActiveSkills] = useState<string[]>([]);
   const [skillsOpen, setSkillsOpen] = useState(false);
@@ -206,6 +207,7 @@ export default function App() {
         setModels(e.models);
         setModelCur(e.current);
         setModelSel(e.selected);
+        setAgentMode(!!e.agent_mode);
         break;
       case "skills":
         setSkills(e.skills);
@@ -347,9 +349,10 @@ export default function App() {
     setProgress({ stage: "hermes", lines: [] });
     safeSend({ type: "setup_install", target: "hermes" });
   };
-  const needAuth = !!auth && (!auth.hermes.installed || !auth.logged_in);
+  const needAuth = agentMode && !!auth && (!auth.hermes.installed || !auth.logged_in); // Hermes login only matters in ⚡ mode
   const showAuth = needAuth && (authOpen || (!authDismissed && conn === "open"));
 
+  const toggleAgentMode = () => safeSend({ type: "set_agent_mode", on: !agentMode });
   const selectModel = (m: ModelOption | null) => safeSend({ type: "set_model", model: m?.id ?? null, provider: m?.provider ?? null });
   const changeSkills = (names: string[]) => {
     setActiveSkills(names);
@@ -537,7 +540,7 @@ export default function App() {
           button over the top-right corner of the taskpane (it cannot be hidden from an add-in). */}
       <header className="flex h-8 shrink-0 items-center gap-1 border-b border-gray-500/20 px-2 pr-[68px]">
         <span data-tip={t("header.bridge", { state: t(`conn.${conn}`) }) + (hermes ? t(hermes.installed ? "header.hermesOk" : "header.hermesMissing") : "")} data-tip-left="" className="flex items-center gap-1.5">
-          <StatusDot tone={hermes && !hermes.installed ? "bad" : connTone} pulse={conn === "connecting"} />
+          <StatusDot tone={agentMode && hermes && !hermes.installed ? "bad" : connTone} pulse={conn === "connecting"} />
           <strong className="text-[12px] font-semibold">Hermes</strong>
         </span>
         <span className="text-[11px] capitalize text-gray-500">{currentHost()}</span>
@@ -561,11 +564,11 @@ export default function App() {
         </button>
       </header>
 
-      {(conn === "closed" || (hermes && !hermes.installed) || needAuth || error) && (
+      {(conn === "closed" || (agentMode && hermes && !hermes.installed) || needAuth || error) && (
         <div className="shrink-0 space-y-1 px-2 pt-1.5">
           {needAuth && auth?.hermes.installed && <Pill tone="warn" onClick={() => setAuthOpen(true)}>{t("banner.signIn")}</Pill>}
           {conn === "closed" && <Pill tone="warn">{t("banner.bridgeDown")}</Pill>}
-          {hermes && !hermes.installed && <Pill tone="bad">{t("banner.noHermes")}</Pill>}
+          {agentMode && hermes && !hermes.installed && <Pill tone="bad">{t("banner.noHermes")}</Pill>}
           {error && (
             <div className="flex items-start gap-1 rounded-lg border border-red-500/25 bg-red-500/10 px-2 py-1 text-[11px] text-red-700 dark:text-red-300">
               <span className="flex-1 break-words">{error}</span>
@@ -682,6 +685,7 @@ export default function App() {
         <IconButton tip={t("header.inline", { key: shortcutLabel })} onClick={() => void openInline()}><IconEdit /></IconButton>
         <IconButton tip={activeSkills.length ? t("header.skillsActive", { n: activeSkills.length }) : t("header.skills")} onClick={() => setSkillsOpen(true)} active={activeSkills.length > 0}><IconSkills /></IconButton>
         <IconButton tip={t("header.tools")} onClick={() => setTab(chat ? "tools" : "chat")} active={!chat}><IconTools /></IconButton>
+        <IconButton tip={agentMode ? t("tb.agentOn") : t("tb.agentOff")} onClick={toggleAgentMode} active={agentMode} disabled={!!busy}><IconBolt /></IconButton>
         <span className="min-w-0 flex-1 truncate px-1.5 text-center text-[10.5px] text-gray-500">{(() => {
           const c = ws.chats.find((x) => x.id === ws.activeId);
           const pr = c?.projectId ? ws.projects.find((x) => x.id === c.projectId) : undefined;
